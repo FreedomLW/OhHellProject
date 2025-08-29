@@ -11,7 +11,7 @@ from rlohhell.games.base import Card
 
 class TestOhHellMethods(unittest.TestCase):
 
-    def test_get_num_actions(self):
+    def test_get_num_players(self):
         game = Game()
         num_players = game.get_num_players()
         self.assertEqual(num_players, 4)
@@ -19,7 +19,7 @@ class TestOhHellMethods(unittest.TestCase):
     def test_get_num_actions(self):
         game = Game()
         num_actions = game.get_num_actions()
-        self.assertEqual(num_actions, 63)
+        self.assertEqual(num_actions, 45)
 
     def test_init_game(self):
         game = Game()
@@ -28,7 +28,7 @@ class TestOhHellMethods(unittest.TestCase):
         game.step(1)
         game.step(2)
         actions = game.get_legal_actions()
-        self.assertNotIn(6, actions)
+        self.assertNotIn(4, actions)
         
     def test_step(self):
         game = Game()
@@ -76,7 +76,7 @@ class TestOhHellMethods(unittest.TestCase):
 
     def test_determine_winner(self):
         trump_card = Card('D', 'T')
-        played_cards = [Card('D','A'), Card('S','2'), Card('D','3'), Card('H','4')]
+        played_cards = [Card('D','A'), Card('S','6'), Card('D','7'), Card('H','8')]
         winner = determine_winner(played_cards, trump_card)
         self.assertEqual(winner, 0)
 
@@ -93,8 +93,8 @@ class TestOhHellMethods(unittest.TestCase):
             state, _ = game.step(action)
         num_played_cards = len(game.previously_played_cards)
         num_played_cards_player3 = len(game.players[2].played_cards)
-        self.assertEqual(num_played_cards, 40)
-        self.assertEqual(num_played_cards_player3, 10)  
+        self.assertEqual(num_played_cards, 32)
+        self.assertEqual(num_played_cards_player3, 8)
     
 if __name__ == '__main__':
     unittest.main() 

@@ -1,17 +1,42 @@
-''' Game-related base classes
-'''
+''' Game-related base classes'''
+from enum import Enum
+
+
+class Suit(Enum):
+    '''Enumeration of card suits.'''
+    SPADES = 'S'
+    HEARTS = 'H'
+    DIAMONDS = 'D'
+    CLUBS = 'C'
+    BLACK_JOKER = 'BJ'
+    RED_JOKER = 'RJ'
+
+
+class Rank(Enum):
+    '''Enumeration of card ranks for the short deck (6 through Ace).'''
+    SIX = '6'
+    SEVEN = '7'
+    EIGHT = '8'
+    NINE = '9'
+    TEN = 'T'
+    JACK = 'J'
+    QUEEN = 'Q'
+    KING = 'K'
+    ACE = 'A'
+
+
 class Card:
-    '''
-    Card stores the suit and rank of a single card
+    '''Card stores the suit and rank of a single card.
 
     Note:
-        The suit variable in a standard card game should be one of [S, H, D, C, BJ, RJ] meaning [Spades, Hearts, Diamonds, Clubs, Black Joker, Red Joker]
-        Similarly the rank variable should be one of [A, 2, 3, 4, 5, 6, 7, 8, 9, T, J, Q, K]
+        The suit variable should be one of ``[S, H, D, C, BJ, RJ]`` meaning
+        ``[Spades, Hearts, Diamonds, Clubs, Black Joker, Red Joker]``.
+        The rank variable uses a short deck from ``6`` through ``A``.
     '''
     suit = None
     rank = None
-    valid_suit = ['S', 'H', 'D', 'C', 'BJ', 'RJ']
-    valid_rank = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K']
+    valid_suit = [s.value for s in Suit]
+    valid_rank = [r.value for r in Rank]
 
     def __init__(self, suit, rank):
         ''' Initialize the suit and rank of a card

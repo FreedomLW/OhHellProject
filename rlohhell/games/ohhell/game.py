@@ -48,7 +48,7 @@ class OhHellGame:
         self.judger = Judger(self.np_random)
 
         # Deal cards to each player to prepare for the round
-        for i in range(10 * self.num_players):
+        for i in range(8 * self.num_players):
             self.players[i % self.num_players].hand.append(self.dealer.deal_card())
 
 
@@ -60,11 +60,11 @@ class OhHellGame:
         self.round = Round(np_random= self.np_random, 
                            dealer= self.dealer,
                            num_players= self.num_players,
-                           round_number= 10,
+                           round_number= 8,
                            last_winner= self.current_player,
                            current_player= self.current_player)
 
-        # Count the round. There are 10 rounds in each game.
+        # Count the round. There are 8 rounds in each game.
         self.round_counter = 0
 
         self.history = []
@@ -195,7 +195,7 @@ class OhHellGame:
         '''
 
         # If all rounds are finshed
-        if self.round_counter >= 10:
+        if self.round_counter >= 8:
             return True
         return False
 
@@ -221,9 +221,10 @@ class OhHellGame:
         ''' Return the number of applicable actions
 
         Returns:
-            (int): The number of actions. There are at most 63 possible actions.
+            int: The number of actions. With a 36-card deck there are
+                 36 card actions plus 9 bidding actions.
         '''
-        return 63
+        return 45
 
     def get_player_id(self):
         ''' Return the current player's id

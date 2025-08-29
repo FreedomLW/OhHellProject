@@ -22,10 +22,11 @@ class Hand:
         self.cards_left = cards_left  # The set of cards not played yet
         
 
-        self.RANK_TO_STRING = {2: "2", 3: "3", 4: "4", 5: "5", 6: "6",
-                               7: "7", 8: "8", 9: "9", 10: "T", 11: "J", 12: "Q", 13: "K", 14: "A"}
-        self.STRING_TO_RANK = {v:k for k, v in self.RANK_TO_STRING.items()}
-        self.RANK_LOOKUP = "23456789TJQKA"
+        self.RANK_TO_STRING = {6: "6", 7: "7", 8: "8", 9: "9",
+                               10: "T", 11: "J", 12: "Q", 13: "K", 14: "A"}
+        self.STRING_TO_RANK = {v: k for k, v in self.RANK_TO_STRING.items()}
+        # Order used when sorting cards, 6 is lowest and Ace highest
+        self.RANK_LOOKUP = "6789TJQKA"
         self.SUIT_LOOKUP = "SCDH"
 
 
