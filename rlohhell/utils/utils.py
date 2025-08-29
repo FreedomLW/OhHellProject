@@ -39,6 +39,18 @@ def init_standard_deck():
     res = [Card(suit, rank) for suit in suit_list for rank in rank_list]
     return res
 
+def init_short_deck():
+    ''' Initialize a short deck of 36 cards used in Odessa poker.
+
+    The deck contains cards 6 through Ace in each of the four suits.
+
+    Returns:
+        list: A list of :class:`Card` objects representing the deck
+    '''
+    suit_list = ['S', 'H', 'D', 'C']
+    rank_list = ['6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A']
+    return [Card(suit, rank) for suit in suit_list for rank in rank_list]
+
 def init_54_deck():
     ''' Initialize a standard deck of 52 cards, BJ and RJ
 
@@ -68,8 +80,9 @@ def rank2int(rank):
     if rank == '':
         return -1
     elif rank.isdigit():
-        if int(rank) >= 2 and int(rank) <= 10:
-            return int(rank)
+        value = int(rank)
+        if value >= 6 and value <= 10:
+            return value
         else:
             return None
     elif rank == 'A':
@@ -96,7 +109,7 @@ def int2rank(number):
     Note:
         1. If the input rank is not valid, the function will return None.
     '''
-    if number >= 2 and number < 10:
+    if number >= 6 and number < 10:
         return str(number)
     elif number == 14:
         return "A"

@@ -1,4 +1,4 @@
-from rlohhell.utils.utils import init_standard_deck
+from rlohhell.utils.utils import init_short_deck
 
 class OhHellDealer:
 
@@ -6,7 +6,8 @@ class OhHellDealer:
         ''' Initialize a ohhell dealer class
         '''
         self.np_random = np_random
-        self.deck = init_standard_deck()
+        # Odessa poker uses a 36-card deck from 6 through Ace
+        self.deck = init_short_deck()
         self.shuffle()
 
     def shuffle(self):
