@@ -1,4 +1,5 @@
 from rlohhell.utils.utils import init_short_deck
+from rlohhell.games.base import Card
 
 class OhHellDealer:
 
@@ -16,13 +17,18 @@ class OhHellDealer:
         self.np_random.shuffle(self.deck)
 
     def flip_trump_card(self):
-        ''' Flip trump card when a new game starts
+        """Return the trump card for a new game.
+
+        The original implementation flipped a random card from the deck to
+        determine the trump suit. In this variant the trump suit is fixed to
+        diamonds, so we simply return a diamond card without altering the deck.
 
         Returns:
-            (object): The card to be used as the trump card 
-        '''
-        trump_card = self.deck.pop()
-        return trump_card
+            Card: A :class:`Card` object representing the trump. The rank is
+            irrelevant for trump determination, so the lowest rank is used.
+        """
+        # Always return a diamond card
+        return Card('D', '6')
 
     def deal_cards(self, player, num):
         ''' Deal some cards from deck to one player

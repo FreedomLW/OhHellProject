@@ -80,6 +80,17 @@ class TestOhHellMethods(unittest.TestCase):
         winner = determine_winner(played_cards, trump_card)
         self.assertEqual(winner, 0)
 
+    def test_trump_always_diamonds(self):
+        """Ensure diamonds are always treated as the trump suit."""
+        game = Game()
+        game.init_game()
+        self.assertEqual(game.trump_card.suit, 'D')
+
+        # A diamond should beat a non-diamond card of the same rank.
+        played_cards = [Card('D', '9'), Card('H', '9')]
+        winner = determine_winner(played_cards, game.trump_card)
+        self.assertEqual(winner, 0)
+
     def test_player_get_player_id(self):
         player = Player(0, np.random.RandomState())
         self.assertEqual(0, player.get_player_id())
