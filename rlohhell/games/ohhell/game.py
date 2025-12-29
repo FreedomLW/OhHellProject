@@ -45,7 +45,12 @@ from rlohhell.games.ohhell import Dealer, Player, Judger, Round
 class OhHellGame:
     """Environment class modelling a full game of Odessa poker."""
 
-    def __init__(self, allow_step_back: bool = False, num_players: int = 4):
+    def __init__(
+        self,
+        allow_step_back: bool = False,
+        num_players: int = 4,
+        player_strategies=None,
+    ):
         self.allow_step_back = allow_step_back
         self.np_random = np.random.RandomState()
         self.num_players = num_players
@@ -66,6 +71,11 @@ class OhHellGame:
         self.current_player = random.randint(0, self.num_players - 1)
         self.game_over = False
         self.bids_history = []
+
+        # Optional non-learning opponents for quick simulations
+        self.player_strategies = None
+        if player_strategies is not None:
+            self.set_player_strategies(player_strategies)
 
         # The following variables are created in ``init_game`` but defined here
         # for type checking tools and clarity
@@ -133,12 +143,17 @@ class OhHellGame:
         self.num_players = game_config['game_num_players']
 
     # Game initialisation ------------------------------------------------
-    def init_game(self):
+    def init_game(self, player_strategies=None):
         """Initialise a brand new game and return the first state."""
 
         self.dealer = Dealer(self.np_random)
         self.players = [Player(i, self.np_random) for i in range(self.num_players)]
         self.judger = Judger(self.np_random)
+
+        if player_strategies is not None:
+            self.set_player_strategies(player_strategies)
+        elif self.player_strategies is None:
+            self.player_strategies = [None for _ in range(self.num_players)]
 
         self.round_sequence = self._compute_round_sequence()
         self.current_round = 0
@@ -158,6 +173,59 @@ class OhHellGame:
         player_id = self.round.current_player
         state = self.get_state(player_id)
         return state, player_id
+
+    # Strategy helpers --------------------------------------------------
+    def set_player_strategies(self, strategies):
+        if len(strategies) != self.num_players:
+            raise ValueError("Number of strategies must match number of players")
+        self.player_strategies = list(strategies)
+
+    def _strategy_action(self, player_id):
+        if not self.player_strategies:
+            return None
+
+        strategy = self.player_strategies[player_id]
+        if strategy is None:
+            return None
+
+        if hasattr(strategy, "select_action"):
+            return strategy.select_action(self, player_id)
+
+        raise TypeError("Strategies must implement a select_action method")
+
+    def play_automated(self, action=None):
+        """Advance the game letting configured strategies act automatically.
+
+        If ``action`` is provided it will be applied for the current player
+        before bot-controlled players continue to act.  The method returns the
+        next player's state when a non-automated player is reached, or
+        ``(None, None)`` if the game finishes.
+        """
+
+        if action is not None:
+            state, player_id = self.step(action)
+        else:
+            state, player_id = self.get_state(self.current_player), self.current_player
+
+        while not self.is_over():
+            auto_action = self._strategy_action(self.current_player)
+            if auto_action is None:
+                return state, player_id
+
+            state, player_id = self.step(auto_action)
+
+        return None, None
+
+    def play_full_game(self):
+        """Play an entire game using configured strategies for every player."""
+
+        if not self.player_strategies or any(s is None for s in self.player_strategies):
+            raise ValueError("All player slots must have strategies to auto-play a full game")
+
+        while not self.is_over():
+            action = self._strategy_action(self.current_player)
+            self.step(action)
+
 
     # Game progression ---------------------------------------------------
     def step(self, action):
