@@ -1,7 +1,10 @@
 import random
 
 import numpy as np
-from stable_baselines3 import PPO
+import pytest
+
+sb3 = pytest.importorskip("stable_baselines3")
+PPO = sb3.PPO
 
 from rlohhell.envs.ohhell import OhHellEnv2
 
@@ -11,13 +14,16 @@ def test_reset_and_step_returns_valid_shapes():
     obs, _ = env.reset()
     assert obs.shape == (env.obs_size,)
 
-    legal_actions = list(env._get_legal_actions())
+    action_mask = env._get_legal_actions()
+    legal_actions = list(action_mask)
     action = random.choice(legal_actions)
 
     next_obs, reward, terminated, truncated, info = env.step(action)
     assert next_obs.shape == (env.obs_size,)
     assert isinstance(reward, float)
     assert "legal_actions" in info
+    assert "action_mask" in info
+    assert info["action_mask"].dtype == np.bool_
     assert isinstance(terminated, bool)
     assert isinstance(truncated, bool)
 

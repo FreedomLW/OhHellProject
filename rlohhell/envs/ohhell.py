@@ -15,10 +15,55 @@ from rlohhell.games.ohhell import Game
 from rlohhell.games.base import Card
 from rlohhell.games.ohhell.utils import ACTION_LIST, ACTION_SPACE
 
-
 DEFAULT_GAME_CONFIG = {
     "game_num_players": 4,
 }
+
+
+def mask_from_state(state):
+    """Build a boolean action mask from a raw game state.
+
+    During bidding the mask covers the bid range ``[0, hand_size]`` and
+    excludes the forbidden final bid when applicable. During card play the
+    mask spans the player's hand plus two joker toggles for ``7♠`` in low and
+    high modes.
+    """
+
+    legal_actions = state.get("legal_actions", [])
+    hand = state.get("hand", [])
+    if not legal_actions:
+        return np.zeros(len(hand) + 2, dtype=np.bool_)
+
+    if isinstance(legal_actions[0], int):
+        hand_size = len(hand)
+        mask = np.zeros(hand_size + 1, dtype=np.bool_)
+        for bid in legal_actions:
+            if 0 <= bid <= hand_size:
+                mask[bid] = True
+        return mask
+
+    mask = np.zeros(len(hand) + 2, dtype=np.bool_)
+    seven_spades = Card("S", "7")
+    for idx, card in enumerate(hand):
+        if card in legal_actions:
+            mask[idx] = True
+        if card == seven_spades:
+            if any(
+                getattr(action, "joker_mode", "low") == "low"
+                and action.suit == seven_spades.suit
+                and action.rank == seven_spades.rank
+                for action in legal_actions
+            ):
+                mask[len(hand)] = True
+            if any(
+                getattr(action, "joker_mode", "low") == "high"
+                and action.suit == seven_spades.suit
+                and action.rank == seven_spades.rank
+                for action in legal_actions
+            ):
+                mask[len(hand) + 1] = True
+
+    return mask
 
 
 class OhHellEnv(Env):
@@ -65,12 +110,13 @@ class OhHellEnv(Env):
         return extracted_state
 
     def _get_legal_actions(self):
-        legal_actions = self.game.get_legal_actions()
-        if self.game.round.players_proposed == self.game.num_players:
-            legal_ids = {ACTION_SPACE[action.get_index()]: None for action in legal_actions}
-        else:
-            legal_ids = {ACTION_SPACE[str(action)]: None for action in legal_actions}
-        return OrderedDict(legal_ids)
+        state = self.game.get_state(self.agent_id)
+        mask = mask_from_state(state)
+        legal_ids = OrderedDict()
+        for idx, allowed in enumerate(mask):
+            if allowed:
+                legal_ids[idx] = None
+        return legal_ids
 
     def get_payoffs(self):
         return self.game.get_payoffs()
@@ -111,6 +157,7 @@ class OhHellEnv2(gym.Env):
     """
 
     metadata = {"render.modes": []}
+    MAX_ACTIONS = 11
 
     def __init__(self, num_players: int = 4, agent_id: int = 0):
         super().__init__()
@@ -124,7 +171,7 @@ class OhHellEnv2(gym.Env):
             self.card2index: Dict[str, int] = json.load(file)
 
         self.obs_size = 108 + 2 + (self.num_players * 3) + self.num_players + 1
-        self.action_space = spaces.Discrete(len(ACTION_LIST))
+        self.action_space = spaces.Discrete(self.MAX_ACTIONS)
         self.observation_space = spaces.Box(
             low=0.0, high=1.0, shape=(self.obs_size,), dtype=np.float32
         )
@@ -146,8 +193,10 @@ class OhHellEnv2(gym.Env):
         self._final_scores_applied = False
         self._last_score = self._current_score()
         self._advance_to_agent()
-        obs = self._extract_state(self.game.get_state(self.agent_id))
-        return obs, {}
+        state = self.game.get_state(self.agent_id)
+        obs = self._extract_state(state)
+        info = {"action_mask": mask_from_state(state)}
+        return obs, info
 
     def step(self, action):
         total_reward = 0.0
@@ -155,7 +204,12 @@ class OhHellEnv2(gym.Env):
         if self.game.get_player_id() != self.agent_id:
             total_reward += self._advance_to_agent()
 
-        decoded_action = self._decode_action(action)
+        state = self.game.get_state(self.agent_id)
+        action_mask = mask_from_state(state)
+        if action >= len(action_mask) or not action_mask[action]:
+            action = int(np.flatnonzero(action_mask)[0])
+
+        decoded_action = self._decode_action(action, state)
         self.game.step(decoded_action)
         total_reward += self._update_score_reward()
 
@@ -164,23 +218,58 @@ class OhHellEnv2(gym.Env):
         if done:
             total_reward += self._apply_final_scores()
 
-        obs = self._extract_state(self.game.get_state(self.agent_id))
-        info = {"legal_actions": list(self._get_legal_actions())}
+        state = self.game.get_state(self.agent_id)
+        obs = self._extract_state(state)
+        info = {
+            "legal_actions": list(self._get_legal_actions()),
+            "action_mask": mask_from_state(state),
+        }
         return obs, float(total_reward), bool(done), False, info
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-    def _decode_action(self, action_id: int):
-        legal_ids = self._get_legal_actions()
-        if action_id in legal_ids:
-            raw_action = ACTION_LIST[action_id]
-        else:
-            raw_action = ACTION_LIST[random.choice(list(legal_ids))]
+    def _decode_action(self, action_id: int, state=None):
+        state = state or self.game.get_state(self.agent_id)
+        legal_actions = state["legal_actions"]
 
-        if self.game.round.players_proposed == self.game.num_players:
-            return Card(raw_action[0], raw_action[1])
-        return int(raw_action)
+        if not legal_actions:
+            raise ValueError("No legal actions available to decode")
+
+        if isinstance(legal_actions[0], int):
+            if action_id in legal_actions:
+                return int(action_id)
+            return int(legal_actions[0])
+
+        hand = state["hand"]
+        seven_spades = Card("S", "7")
+        if action_id == len(hand):
+            candidate = Card("S", "7", joker_mode="low")
+        elif action_id == len(hand) + 1:
+            candidate = Card("S", "7", joker_mode="high")
+        else:
+            candidate = hand[action_id] if 0 <= action_id < len(hand) else None
+
+        if candidate is None:
+            return legal_actions[0]
+
+        for option in legal_actions:
+            if not isinstance(option, Card):
+                continue
+            if option == candidate and getattr(option, "joker_mode", None) == getattr(
+                candidate, "joker_mode", None
+            ):
+                return option
+
+            if (
+                option.suit == seven_spades.suit
+                and option.rank == seven_spades.rank
+                and getattr(option, "joker_mode", None)
+                == getattr(candidate, "joker_mode", None)
+            ):
+                return option
+
+        return legal_actions[0]
 
     def _get_legal_actions(self):
         legal_actions = self.game.get_legal_actions()
