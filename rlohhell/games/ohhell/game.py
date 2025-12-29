@@ -65,6 +65,7 @@ class OhHellGame:
         self.payoffs = [0 for _ in range(num_players)]
         self.current_player = random.randint(0, self.num_players - 1)
         self.game_over = False
+        self.bids_history = []
 
         # The following variables are created in ``init_game`` but defined here
         # for type checking tools and clarity
@@ -73,6 +74,7 @@ class OhHellGame:
         self.trump_card = None
         self.last_winner = 0
         self.history = []
+        self.bids_history = []
 
     # ---------------------------------------------------------------------
     # Utility methods
@@ -174,6 +176,7 @@ class OhHellGame:
                 self.current_round,
                 list(self.scores),
                 deepcopy(self.previously_played_cards),
+                list(self.bids_history),
             )
             self.history.append(snapshot)
 
@@ -199,6 +202,9 @@ class OhHellGame:
 
             # If all tricks for this round have been played, score the round
             if self.tricks_played >= self.round.round_number:
+                # Keep a record of the bids that determined the score
+                self.bids_history.append(list(self.round.proposed_tricks))
+
                 round_scores = self.judger.judge_game(self.players)
                 for i, s in enumerate(round_scores):
                     self.scores[i] += s
@@ -223,6 +229,7 @@ class OhHellGame:
         state['players_previously_played_cards'] = [p.played_cards for p in self.players]
         state['round_index'] = self.current_round
         state['scores'] = list(self.scores)
+        state['bids_history'] = list(self.bids_history)
         return state
 
     # ------------------------------------------------------------------
@@ -240,6 +247,7 @@ class OhHellGame:
             self.current_round,
             self.scores,
             self.previously_played_cards,
+            self.bids_history,
         ) = self.history.pop()
         self.game_over = False
         return True

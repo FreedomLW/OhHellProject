@@ -39,6 +39,25 @@ class OhHellRound:
         # The number of players that have bid so far
         self.players_proposed = 0
 
+    def _disallowed_last_bid(self):
+        """Return the bid value that would violate the sum rule for the last bidder.
+
+        The classical Oh Hell rule forbids the combined bids from matching the
+        number of cards dealt in the round. This helper calculates the single
+        value that is off-limits for the final player to bid, or ``None`` if the
+        constraint does not apply.
+        """
+
+        if self.players_proposed != self.num_players - 1:
+            return None
+
+        total_tricks = sum(self.proposed_tricks)
+        disallowed_bid = self.round_number - total_tricks
+        if 0 <= disallowed_bid <= self.round_number:
+            return disallowed_bid
+
+        return None
+
 
     def proceed_round(self, players, action):
         ''' Call other Classes's functions to keep one round running
@@ -48,16 +67,31 @@ class OhHellRound:
         '''
 
         legal_actions = self.get_legal_actions(players, self.current_player)
-        if action not in legal_actions:
-            raise Exception('{} is not legal action. Legal actions: {}'.format(action, legal_actions))
-        
+
         # IF the action was a number it is treated a bid otherwise as a Card
         if isinstance(action, int):
+            disallowed_bid = self._disallowed_last_bid()
+            if disallowed_bid is not None and action == disallowed_bid:
+                # Nudge the last bidder onto a legal value rather than raising
+                # an exception.  This mirrors common table play where the
+                # player is simply not permitted to lock in the forbidden
+                # number.
+                for alternative in legal_actions:
+                    if alternative != disallowed_bid:
+                        action = alternative
+                        break
+
+            if action not in legal_actions:
+                raise Exception('{} is not legal action. Legal actions: {}'.format(action, legal_actions))
+
             players[self.current_player].proposed_tricks = action
             self.proposed_tricks[self.current_player] = action
             players[self.current_player].has_proposed = True
             self.players_proposed += 1
         else:
+            if action not in legal_actions:
+                raise Exception('{} is not legal action. Legal actions: {}'.format(action, legal_actions))
+
             players[self.current_player].played_cards.append(action)
             self.played_cards.append(action)
             players[self.current_player].hand.remove(action)
@@ -76,12 +110,9 @@ class OhHellRound:
         # this affects the last bidder's actions
         if players[player_id].has_proposed == False:
             full_list = list(range(0, self.round_number+1))
-            if self.players_proposed == self.num_players - 1:
-                total_tricks = sum(self.proposed_tricks)
-                dissallowed_bid = self.round_number - total_tricks
-                if dissallowed_bid > -1 and dissallowed_bid <= self.round_number:
-                    full_list.remove(dissallowed_bid)
-                    return full_list
+            disallowed_bid = self._disallowed_last_bid()
+            if disallowed_bid is not None and disallowed_bid in full_list:
+                full_list.remove(disallowed_bid)
             return full_list
 
         full_list = players[player_id].hand
