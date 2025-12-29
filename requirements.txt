@@ -42,6 +42,8 @@ rsa==4.7.2
 scipy==1.7.1
 six==1.15.0
 stable-baselines3==1.1.0
+sb3-contrib
+gymnasium
 tensorboard==2.6.0
 tensorboard-data-server==0.6.1
 tensorboard-plugin-wit==1.8.0

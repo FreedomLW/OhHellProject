@@ -1,8 +1,10 @@
 import json
 import os
+import json
+import os
 import random
 from collections import OrderedDict
-from typing import Dict
+from typing import Callable, Dict, Iterable, Optional, Sequence
 
 import gymnasium as gym
 import numpy as np
@@ -147,11 +149,12 @@ class OhHellEnv(Env):
 
 
 class OhHellEnv2(gym.Env):
-    """Single-agent Gym wrapper for Oh Hell!
+    """Single-agent Gymnasium wrapper for Oh Hell!
 
-    The learning agent always controls ``agent_id``. All opponents act with
-    a simple random strategy inside the environment so ``step`` always
-    represents the agent's decision followed by the rest of the trick.
+    The learning agent always controls ``agent_id``. Opponents can either use
+    a provided policy callable or default to random play. Observations are
+    returned as a dict suitable for ``MultiInputPolicy`` with an ``action_mask``
+    entry that can be consumed by :class:`sb3_contrib.MaskablePPO`.
     Rewards are granted as the change in the agent's score after each
     completed trick or after the final bonus calculation when the game ends.
     """
@@ -159,11 +162,19 @@ class OhHellEnv2(gym.Env):
     metadata = {"render.modes": []}
     MAX_ACTIONS = 11
 
-    def __init__(self, num_players: int = 4, agent_id: int = 0):
+    def __init__(
+        self,
+        num_players: int = 4,
+        agent_id: int = 0,
+        opponent_policy: Optional[
+            Callable[[Dict[str, np.ndarray], np.ndarray, int], int]
+        ] = None,
+    ):
         super().__init__()
         self.num_players = num_players
         self.agent_id = agent_id
         self.game = Game(num_players=num_players)
+        self.opponent_policy = opponent_policy
 
         with open(
             os.path.join(rlohhell.__path__[0], "games/ohhell/card2index.json"), "r"
@@ -172,8 +183,13 @@ class OhHellEnv2(gym.Env):
 
         self.obs_size = 108 + 2 + (self.num_players * 3) + self.num_players + 1
         self.action_space = spaces.Discrete(self.MAX_ACTIONS)
-        self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(self.obs_size,), dtype=np.float32
+        self.observation_space = spaces.Dict(
+            {
+                "observation": spaces.Box(
+                    low=0.0, high=1.0, shape=(self.obs_size,), dtype=np.float32
+                ),
+                "action_mask": spaces.MultiBinary(self.MAX_ACTIONS),
+            }
         )
 
         self.np_random = None
@@ -194,7 +210,7 @@ class OhHellEnv2(gym.Env):
         self._last_score = self._current_score()
         self._advance_to_agent()
         state = self.game.get_state(self.agent_id)
-        obs = self._extract_state(state)
+        obs = self._get_obs_dict(state)
         info = {"action_mask": mask_from_state(state)}
         return obs, info
 
@@ -219,7 +235,7 @@ class OhHellEnv2(gym.Env):
             total_reward += self._apply_final_scores()
 
         state = self.game.get_state(self.agent_id)
-        obs = self._extract_state(state)
+        obs = self._get_obs_dict(state)
         info = {
             "legal_actions": list(self._get_legal_actions()),
             "action_mask": mask_from_state(state),
@@ -320,6 +336,13 @@ class OhHellEnv2(gym.Env):
         obs[offset] = self.game.round_counter / max_cards
         return obs
 
+    def _get_obs_dict(self, state):
+        action_mask = mask_from_state(state)
+        return {
+            "observation": self._extract_state(state),
+            "action_mask": action_mask.astype(np.int8),
+        }
+
     def _current_score(self) -> int:
         return self.game.players[self.agent_id].tricks_won
 
@@ -332,7 +355,8 @@ class OhHellEnv2(gym.Env):
     def _advance_to_agent(self) -> float:
         reward = 0.0
         while not self.game.is_over() and self.game.get_player_id() != self.agent_id:
-            opponent_action = self._sample_opponent_action()
+            current_player = self.game.get_player_id()
+            opponent_action = self._sample_opponent_action(current_player)
             self.game.step(opponent_action)
             reward += self._update_score_reward()
         if self.game.is_over():
@@ -353,8 +377,19 @@ class OhHellEnv2(gym.Env):
             return self.card2index[card]
         return self.card2index[card.get_index()]
 
-    def _sample_opponent_action(self):
+    def _sample_opponent_action(self, player_id: int):
         legal_actions = list(self.game.get_legal_actions())
+        if not legal_actions:
+            raise ValueError("Opponents have no legal actions to play")
+
+        if self.opponent_policy is not None:
+            state = self.game.get_state(player_id)
+            action_mask = mask_from_state(state)
+            obs_dict = self._get_obs_dict(state)
+            chosen = self.opponent_policy(obs_dict, action_mask, player_id)
+            if 0 <= chosen < len(action_mask) and action_mask[chosen]:
+                return self._decode_action(chosen, state)
+
         raw_action = random.choice(legal_actions)
         return raw_action
 
