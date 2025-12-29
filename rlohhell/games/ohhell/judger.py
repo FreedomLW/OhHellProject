@@ -23,16 +23,32 @@ class OhHellJudger:
 
 
     def judge_game(self, players):
-        ''' Return the winner of the game
+        '''Calculate round scores according to Oh Hell rules.
+
+        A player scores ``10 * bid`` points for matching their bid exactly.
+        If they win more tricks than they bid they receive a consolation equal
+        to the number of tricks taken.  Missing the bid on the low side costs
+        ``10 * bid`` points.
 
         Args:
             players (list): The list of players who play the game
+        Returns:
+            tuple: Round scores for each player in order
         '''
 
+        round_scores = []
+
         for player in players:
-            if player.tricks_won == player.proposed_tricks:
-                player.tricks_won += 10
+            bid = player.proposed_tricks
+            tricks = player.tricks_won
 
-        final_scores = [player.tricks_won for player in players]
+            if tricks == bid:
+                score = 10 * bid
+            elif tricks > bid:
+                score = tricks
+            else:
+                score = -10 * bid
 
-        return tuple(final_scores)
+            round_scores.append(score)
+
+        return tuple(round_scores)
