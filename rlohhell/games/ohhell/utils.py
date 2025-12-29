@@ -8,6 +8,9 @@ import rlohhell
 from rlohhell.utils.utils import rank2int, int2rank
 from rlohhell.games.base import Card
 
+# In this variant diamonds are always trump
+TRUMP_SUIT = 'D'
+
 # Read required docs
 ROOT_PATH = rlohhell.__path__[0]
 
@@ -42,11 +45,12 @@ def determine_winner(played_cards, trump_card):
     '''
     Return the index of the player that wins in that round
 
-    trump_card (Card): A list of just one card 
+    trump_card (Card): A list of just one card. The suit of this card is
+        ignored because diamonds are always trump in this variant.
     played_cards (list): A list of cards played in the round so far
     '''
 
-    trump_suit = trump_card.suit if trump_card is not None else None
+    trump_suit = TRUMP_SUIT
     first_suit = played_cards[0].suit
 
     if trump_suit is not None:
@@ -85,5 +89,10 @@ def trumps_in_hand(hand, trump_suit):
     ''' Return an array with the trumps from a given list'''
     trump_cards = [ card for card in hand if trump_suit == card.suit ]
     return trump_cards
+
+
+def get_fixed_trump_card():
+    '''Return the fixed trump card for this variant.'''
+    return Card(TRUMP_SUIT, 'A')
 
 
