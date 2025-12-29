@@ -4,6 +4,8 @@
 
 import numpy as np
 from rlohhell.games.base import Card
+from rlohhell.games.ohhell.utils import TRUMP_SUIT
+from rlohhell.utils.utils import rank2int
 
 class OhHellRound:
     ''' Round can call other Classes' functions to keep the game running
@@ -39,6 +41,39 @@ class OhHellRound:
         # The number of players that have bid so far
         self.players_proposed = 0
 
+        # Track whether a high joker started the current trick
+        self.joker_high_lead = False
+
+    @staticmethod
+    def _is_joker(card):
+        return card.suit == 'S' and card.rank == '7'
+
+    @staticmethod
+    def _highest_trump(trump_cards):
+        return max(trump_cards, key=lambda c: rank2int(c.rank))
+
+    def _joker_options(self, card):
+        low = Card(card.suit, card.rank, joker_mode='low')
+        high = Card(card.suit, card.rank, joker_mode='high')
+        return [low, high]
+
+    def _unique_actions(self, actions):
+        seen = set()
+        unique_actions = []
+        for card in actions:
+            key = (card.suit, card.rank, getattr(card, 'joker_mode', None))
+            if key not in seen:
+                unique_actions.append(card)
+                seen.add(key)
+        return unique_actions
+
+    def _actions_with_jokers(self, base_actions, hand):
+        actions = list(base_actions)
+        for card in hand:
+            if self._is_joker(card):
+                actions.extend(self._joker_options(card))
+        return self._unique_actions(actions)
+
     def _disallowed_last_bid(self):
         """Return the bid value that would violate the sum rule for the last bidder.
 
@@ -67,6 +102,9 @@ class OhHellRound:
         '''
 
         legal_actions = self.get_legal_actions(players, self.current_player)
+        is_lead = len(self.played_cards) == 0
+        if is_lead:
+            self.joker_high_lead = False
 
         # IF the action was a number it is treated a bid otherwise as a Card
         if isinstance(action, int):
@@ -91,6 +129,11 @@ class OhHellRound:
         else:
             if action not in legal_actions:
                 raise Exception('{} is not legal action. Legal actions: {}'.format(action, legal_actions))
+
+            if self._is_joker(action):
+                action.joker_mode = getattr(action, 'joker_mode', 'low')
+                if is_lead and action.joker_mode == 'high':
+                    self.joker_high_lead = True
 
             players[self.current_player].played_cards.append(action)
             self.played_cards.append(action)
@@ -119,16 +162,23 @@ class OhHellRound:
 
         # If the player has proposed then available actions are a subset of the player's hand
         if player_id == self.last_winner:
-            return full_list
+            return self._actions_with_jokers(full_list, full_list)
         else:
             if len(self.played_cards) == 0:
-                return full_list
+                return self._actions_with_jokers(full_list, full_list)
+
+            if self.joker_high_lead:
+                trump_cards = [card for card in full_list if TRUMP_SUIT == card.suit]
+                if trump_cards:
+                    return [self._highest_trump(trump_cards)]
+                return self._actions_with_jokers(full_list, full_list)
+
             starting_suit = self.played_cards[0].suit
-            hand_same_as_starter = [card for card in full_list if starting_suit == card.suit ]
+            hand_same_as_starter = [card for card in full_list if starting_suit == card.suit]
             if hand_same_as_starter:
-                return hand_same_as_starter
+                return self._actions_with_jokers(hand_same_as_starter, full_list)
             else:
-                return full_list
+                return self._actions_with_jokers(full_list, full_list)
 
     def get_state(self, players, player_id):
         ''' Encode the state for the player

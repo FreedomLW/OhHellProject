@@ -38,7 +38,7 @@ class Card:
     valid_suit = [s.value for s in Suit]
     valid_rank = [r.value for r in Rank]
 
-    def __init__(self, suit, rank):
+    def __init__(self, suit, rank, joker_mode=None):
         ''' Initialize the suit and rank of a card
 
         Args:
@@ -47,6 +47,9 @@ class Card:
         '''
         self.suit = suit
         self.rank = rank
+        # For special cards like the 7♠ joker we track whether it is played as
+        # the highest or lowest card in the trick.
+        self.joker_mode = joker_mode
 
     def __eq__(self, other):
         if isinstance(other, Card):

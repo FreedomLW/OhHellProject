@@ -197,6 +197,7 @@ class OhHellGame:
             self.previously_played_cards += self.played_cards
             self.played_cards = []
             self.round.played_cards = []
+            self.round.joker_high_lead = False
 
             self.tricks_played += 1
 

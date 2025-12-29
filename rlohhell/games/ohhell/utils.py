@@ -1,6 +1,5 @@
-import os
 import json
-import numpy as np
+import os
 from collections import OrderedDict
 
 import rlohhell
@@ -51,6 +50,12 @@ def determine_winner(played_cards, trump_card):
     '''
 
     trump_suit = TRUMP_SUIT
+
+    # Joker high beats everything regardless of suit or trump
+    for idx, card in enumerate(played_cards):
+        if card.suit == 'S' and card.rank == '7' and getattr(card, 'joker_mode', 'low') == 'high':
+            return idx
+
     first_suit = played_cards[0].suit
 
     if trump_suit is not None:
