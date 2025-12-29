@@ -33,8 +33,27 @@ def _card_label(card: Card) -> str:
         label += f" ({joker_mode})"
     return label
 
+def _map_rank(rank: str | None) -> int:
+    if not rank:
+        return 0
+    if rank == 'A':
+        return 14
+    if rank == 'K':
+        return 13
+    if rank == 'Q':
+        return 12
+    if rank == 'J':
+        return 11
+    if rank == 'T':
+        return 10
+    return int(rank)
+    
+
+def _sort_cards(cards: List[Card]) -> List[Card]:
+    return sorted(cards, key=lambda x: (x.suit, _map_rank(x.rank)), reverse=True)
 
 def _format_hand(cards: List[Card]) -> str:
+    cards = _sort_cards(cards)
     return "  ".join(_card_label(card) for card in cards)
 
 
@@ -55,6 +74,7 @@ class ConsoleOhHellMatch:
 
     num_players: int = 4
     human_player: Optional[int] = None
+    cheat_mode: bool = False
     strategies: Dict[int, BaseStrategy] = field(default_factory=dict)
     record_history: bool = True
     seed: Optional[int] = None
@@ -96,6 +116,7 @@ class ConsoleOhHellMatch:
 
     def _prompt_card(self, legal_actions: List[Card], player_id: int, hand: List[Card]) -> Card:
         print(f"Player {player_id} hand: {_format_hand(hand)}")
+        legal_actions = _sort_cards(legal_actions)
         options = [
             f"{idx}: {_card_label(card)}" for idx, card in enumerate(legal_actions)
         ]
@@ -133,7 +154,10 @@ class ConsoleOhHellMatch:
 
         print(f"Trump suit: {game.trump_card.get_index()}")
         for seat, player in enumerate(game.players):
-            label = _format_hand(player.hand) if seat == self.human_player else f"{len(player.hand)} cards"
+            if self.cheat_mode:
+                label = _format_hand(player.hand)
+            else: 
+                label = _format_hand(player.hand) if seat == self.human_player else f"{len(player.hand)} cards"
             print(f"Player {seat} starting hand: {label}")
 
         # Bidding phase
@@ -153,6 +177,7 @@ class ConsoleOhHellMatch:
 
         while not game.is_over():
             action = self._select_action(game, game.current_player)
+            print(f"  Player {game.current_player} -> {_card_label(action)}")
             current_trick.append((game.current_player, action))
 
             previous_cards = len(game.previously_played_cards)
@@ -164,6 +189,11 @@ class ConsoleOhHellMatch:
                 for seat, card in current_trick:
                     print(f"  Player {seat} -> {_card_label(card)}")
                 print(f"Winner: Player {winner}\n")
+                print('-'*80)
+                if self.cheat_mode:
+                    for seat, player in enumerate(game.players):
+                        cards = _format_hand(player.hand)
+                        print(f"Player {seat} hand: {cards}")
                 self._log({
                     "type": "trick",
                     "cards": [(seat, _card_label(card)) for seat, card in current_trick],

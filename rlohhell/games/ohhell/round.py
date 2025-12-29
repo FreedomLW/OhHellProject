@@ -71,6 +71,8 @@ class OhHellRound:
         actions = list(base_actions)
         for card in hand:
             if self._is_joker(card):
+                if card in actions:
+                    actions.remove(card)
                 actions.extend(self._joker_options(card))
         return self._unique_actions(actions)
 
@@ -166,9 +168,10 @@ class OhHellRound:
         else:
             if len(self.played_cards) == 0:
                 return self._actions_with_jokers(full_list, full_list)
+            
+            trump_cards = [card for card in full_list if TRUMP_SUIT == card.suit]
 
             if self.joker_high_lead:
-                trump_cards = [card for card in full_list if TRUMP_SUIT == card.suit]
                 if trump_cards:
                     return [self._highest_trump(trump_cards)]
                 return self._actions_with_jokers(full_list, full_list)
@@ -177,6 +180,8 @@ class OhHellRound:
             hand_same_as_starter = [card for card in full_list if starting_suit == card.suit]
             if hand_same_as_starter:
                 return self._actions_with_jokers(hand_same_as_starter, full_list)
+            elif trump_cards:
+                return self._actions_with_jokers(trump_cards, full_list)
             else:
                 return self._actions_with_jokers(full_list, full_list)
 

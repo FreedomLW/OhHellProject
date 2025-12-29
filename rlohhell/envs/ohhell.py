@@ -4,10 +4,10 @@ import random
 from collections import OrderedDict
 from typing import Dict
 
-import gym
+import gymnasium as gym
 import numpy as np
-from gym import spaces
-from gym.utils import seeding
+from gymnasium import spaces
+from gymnasium.utils import seeding
 
 import rlohhell
 from rlohhell.envs import Env
