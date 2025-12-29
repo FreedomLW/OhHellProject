@@ -111,11 +111,8 @@ class OhHellGame:
         for i in range(num_cards * self.num_players):
             self.players[i % self.num_players].hand.append(self.dealer.deal_card())
 
-        # If the deck is exhausted there is no trump card this round
-        if len(self.dealer.deck) > 0:
-            self.trump_card = self.dealer.flip_trump_card()
-        else:
-            self.trump_card = None
+        # Diamonds are always trump in this variant
+        self.trump_card = self.dealer.flip_trump_card()
         self.played_cards = []
         self.round = Round(
             round_number=num_cards,

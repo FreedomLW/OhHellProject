@@ -1,4 +1,5 @@
 from rlohhell.utils.utils import init_short_deck
+from rlohhell.games.ohhell.utils import get_fixed_trump_card
 
 class OhHellDealer:
 
@@ -19,10 +20,9 @@ class OhHellDealer:
         ''' Flip trump card when a new game starts
 
         Returns:
-            (object): The card to be used as the trump card 
+            (object): The card to be used as the trump card
         '''
-        trump_card = self.deck.pop()
-        return trump_card
+        return get_fixed_trump_card()
 
     def deal_cards(self, player, num):
         ''' Deal some cards from deck to one player
