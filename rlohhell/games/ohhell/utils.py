@@ -46,10 +46,14 @@ def determine_winner(played_cards, trump_card):
     played_cards (list): A list of cards played in the round so far
     '''
 
-    trump_suit = trump_card.suit
+    trump_suit = trump_card.suit if trump_card is not None else None
     first_suit = played_cards[0].suit
-    
-    trump_cards_played = [rank2int(card.rank) for card in played_cards if trump_suit == card.suit]
+
+    if trump_suit is not None:
+        trump_cards_played = [rank2int(card.rank) for card in played_cards if trump_suit == card.suit]
+    else:
+        trump_cards_played = []
+
     same_as_first_suit = [rank2int(card.rank) for card in played_cards if first_suit == card.suit]
 
     if trump_cards_played:
