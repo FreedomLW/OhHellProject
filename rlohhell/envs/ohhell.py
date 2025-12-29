@@ -169,12 +169,17 @@ class OhHellEnv2(gym.Env):
         opponent_policy: Optional[
             Callable[[Dict[str, np.ndarray], np.ndarray, int], int]
         ] = None,
+        opponent_pool=None,
+        opponent_selector: Optional[Callable[[int, int, object], Dict[int, object]]] = None,
     ):
         super().__init__()
         self.num_players = num_players
         self.agent_id = agent_id
         self.game = Game(num_players=num_players)
         self.opponent_policy = opponent_policy
+        self.opponent_pool = opponent_pool
+        self.opponent_selector = opponent_selector
+        self._opponent_table: Dict[int, object] = {}
 
         with open(
             os.path.join(rlohhell.__path__[0], "games/ohhell/card2index.json"), "r"
@@ -208,6 +213,7 @@ class OhHellEnv2(gym.Env):
         self.game.init_game()
         self._final_scores_applied = False
         self._last_score = self._current_score()
+        self._assign_opponents()
         self._advance_to_agent()
         state = self.game.get_state(self.agent_id)
         obs = self._get_obs_dict(state)
@@ -377,17 +383,45 @@ class OhHellEnv2(gym.Env):
             return self.card2index[card]
         return self.card2index[card.get_index()]
 
+    def _assign_opponents(self) -> None:
+        """Randomly sample opponents for every non-agent seat."""
+
+        assignments: Dict[int, object] = {}
+        if self.opponent_selector is not None:
+            assignments = self.opponent_selector(
+                self.num_players, self.agent_id, self.opponent_pool
+            )
+        elif self.opponent_pool is not None:
+            assignments = getattr(self.opponent_pool, "sample_table", lambda *_: {})(
+                self.num_players, self.agent_id
+            )
+
+        self._opponent_table = assignments or {}
+
     def _sample_opponent_action(self, player_id: int):
         legal_actions = list(self.game.get_legal_actions())
         if not legal_actions:
             raise ValueError("Opponents have no legal actions to play")
 
-        if self.opponent_policy is not None:
+        policy = self._opponent_table.get(player_id, self.opponent_policy)
+
+        if policy is not None:
             state = self.game.get_state(player_id)
             action_mask = mask_from_state(state)
             obs_dict = self._get_obs_dict(state)
-            chosen = self.opponent_policy(obs_dict, action_mask, player_id)
-            if 0 <= chosen < len(action_mask) and action_mask[chosen]:
+
+            if hasattr(policy, "act"):
+                chosen = policy.act(state, action_mask, obs_dict, self.game)
+            else:
+                try:
+                    chosen = policy(obs_dict, action_mask, player_id, state)
+                except TypeError:
+                    chosen = policy(obs_dict, action_mask, player_id)
+
+            if isinstance(chosen, (Card, int)) and chosen in legal_actions:
+                return chosen
+
+            if isinstance(chosen, int) and 0 <= chosen < len(action_mask) and action_mask[chosen]:
                 return self._decode_action(chosen, state)
 
         raw_action = random.choice(legal_actions)
