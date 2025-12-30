@@ -21,49 +21,58 @@ DEFAULT_GAME_CONFIG = {
     "game_num_players": 4,
 }
 
+# Max number of discrete actions available to the agent (cards in hand + two
+# joker toggles). With a 36-card deck split between four players, the largest
+# hand size is nine, so the action mask length stays fixed at 11.
+MAX_ACTIONS = 11
 
-def mask_from_state(state):
-    """Build a boolean action mask from a raw game state.
+
+def mask_from_state(state, max_actions: int = MAX_ACTIONS):
+    """Build a fixed-size boolean action mask from a raw game state.
 
     During bidding the mask covers the bid range ``[0, hand_size]`` and
     excludes the forbidden final bid when applicable. During card play the
     mask spans the player's hand plus two joker toggles for ``7♠`` in low and
-    high modes.
+    high modes. The returned mask is always ``max_actions`` long so it remains
+    compatible with vectorized environments.
     """
 
     legal_actions = state.get("legal_actions", [])
     hand = state.get("hand", [])
+    mask = np.zeros(max_actions, dtype=np.bool_)
     if not legal_actions:
-        return np.zeros(len(hand) + 2, dtype=np.bool_)
+        return mask
 
     if isinstance(legal_actions[0], int):
         hand_size = len(hand)
-        mask = np.zeros(hand_size + 1, dtype=np.bool_)
         for bid in legal_actions:
-            if 0 <= bid <= hand_size:
+            if 0 <= bid < max_actions:
                 mask[bid] = True
         return mask
 
-    mask = np.zeros(len(hand) + 2, dtype=np.bool_)
     seven_spades = Card("S", "7")
     for idx, card in enumerate(hand):
+        if idx >= max_actions - 2:
+            break
         if card in legal_actions:
             mask[idx] = True
         if card == seven_spades:
-            if any(
+            low_idx = len(hand)
+            high_idx = len(hand) + 1
+            if low_idx < max_actions and any(
                 getattr(action, "joker_mode", "low") == "low"
                 and action.suit == seven_spades.suit
                 and action.rank == seven_spades.rank
                 for action in legal_actions
             ):
-                mask[len(hand)] = True
-            if any(
+                mask[low_idx] = True
+            if high_idx < max_actions and any(
                 getattr(action, "joker_mode", "low") == "high"
                 and action.suit == seven_spades.suit
                 and action.rank == seven_spades.rank
                 for action in legal_actions
             ):
-                mask[len(hand) + 1] = True
+                mask[high_idx] = True
 
     return mask
 
@@ -160,7 +169,7 @@ class OhHellEnv2(gym.Env):
     """
 
     metadata = {"render.modes": []}
-    MAX_ACTIONS = 11
+    MAX_ACTIONS = MAX_ACTIONS
 
     def __init__(
         self,
@@ -217,7 +226,8 @@ class OhHellEnv2(gym.Env):
         self._advance_to_agent()
         state = self.game.get_state(self.agent_id)
         obs = self._get_obs_dict(state)
-        info = {"action_mask": mask_from_state(state)}
+        action_mask = mask_from_state(state, self.MAX_ACTIONS)
+        info = {"action_mask": action_mask, "action_masks": action_mask}
         return obs, info
 
     def step(self, action):
@@ -227,7 +237,7 @@ class OhHellEnv2(gym.Env):
             total_reward += self._advance_to_agent()
 
         state = self.game.get_state(self.agent_id)
-        action_mask = mask_from_state(state)
+        action_mask = mask_from_state(state, self.MAX_ACTIONS)
         if action >= len(action_mask) or not action_mask[action]:
             action = int(np.flatnonzero(action_mask)[0])
 
@@ -242,9 +252,11 @@ class OhHellEnv2(gym.Env):
 
         state = self.game.get_state(self.agent_id)
         obs = self._get_obs_dict(state)
+        next_mask = mask_from_state(state, self.MAX_ACTIONS)
         info = {
             "legal_actions": list(self._get_legal_actions()),
-            "action_mask": mask_from_state(state),
+            "action_mask": next_mask,
+            "action_masks": next_mask,
         }
         return obs, float(total_reward), bool(done), False, info
 
@@ -343,11 +355,17 @@ class OhHellEnv2(gym.Env):
         return obs
 
     def _get_obs_dict(self, state):
-        action_mask = mask_from_state(state)
+        action_mask = mask_from_state(state, self.MAX_ACTIONS)
         return {
             "observation": self._extract_state(state),
             "action_mask": action_mask.astype(np.int8),
         }
+
+    def action_masks(self) -> np.ndarray:
+        """Return the current legal action mask for SB3 MaskablePPO."""
+
+        state = self.game.get_state(self.agent_id)
+        return mask_from_state(state, self.MAX_ACTIONS)
 
     def _current_score(self) -> int:
         return self.game.players[self.agent_id].tricks_won
