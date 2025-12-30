@@ -8,10 +8,11 @@ The repository has been trimmed to exclude large training artifacts and build ou
 
 ## Installation
 ```bash
-python -m venv .venv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+uv pip install -r requirements.txt
+uv pip install -e .
 ```
 
 ## Playing or observing in the console
