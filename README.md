@@ -38,14 +38,21 @@ PY
 During bidding you will be prompted for your bid; during play you will see your hand, the legal cards you can choose, and who wins each trick. If you set `record_history=True` (default) you can also inspect the in-memory log after the match.
 
 ## Training
-Use the self-play helper in `scripts/train_maskable_self_play.py` to train a MaskablePPO agent:
+Use the self-play helper in `scripts/train_maskable_self_play.py` to train a MaskablePPO agent or resume from a saved checkpoint:
 
 ```bash
 python scripts/train_maskable_self_play.py --help  # view options
 python scripts/train_maskable_self_play.py --total-timesteps 1_000_000 --num-envs 8
+python scripts/train_maskable_self_play.py --resume-from runs/maskable_ppo/checkpoints/maskable_ppo_100000_steps.zip
 ```
 
 Checkpoints and TensorBoard logs will be written under `runs/` (ignored by git). Saved models can be loaded with `load_model_strategy` for console play or evaluation.
+
+To train the custom `StudentPokerPolicy` backbone with the same self-play loop, enable the student flag:
+
+```bash
+python scripts/train_maskable_self_play.py --use-student-poker --total-timesteps 1_000_000
+```
 
 ## Running tests
 ```bash
