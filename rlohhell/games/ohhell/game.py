@@ -55,6 +55,7 @@ class OhHellGame:
         plateau = [max_cards for _ in range(self.num_players)]
         descend = list(range(max_cards - 1, 0, -1))
         self.round_sequence = climb + plateau + descend
+        self.max_rounds = len(self.round_sequence )
         self.current_round = 0
 
         self.history = []

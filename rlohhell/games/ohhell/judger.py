@@ -45,6 +45,8 @@ class OhHellJudger:
 
             if tricks == bid:
                 score = 10 * bid
+                if tricks == 0:
+                    score = 5
             elif tricks > bid:
                 score = tricks
             else:
