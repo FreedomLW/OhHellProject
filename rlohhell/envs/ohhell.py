@@ -17,14 +17,16 @@ from rlohhell.games.ohhell import Game
 from rlohhell.games.base import Card
 from rlohhell.games.ohhell.utils import ACTION_LIST, ACTION_SPACE
 
+DEFAULT_MAX_HAND_SIZE = 9
 DEFAULT_GAME_CONFIG = {
     "game_num_players": 4,
+    "max_hand_size": DEFAULT_MAX_HAND_SIZE,
 }
 
 # Max number of discrete actions available to the agent (cards in hand + two
 # joker toggles). With a 36-card deck split between four players, the largest
 # hand size is nine, so the action mask length stays fixed at 11.
-MAX_ACTIONS = 11
+MAX_ACTIONS = DEFAULT_MAX_HAND_SIZE + 2
 
 
 def mask_from_state(state, max_actions: int = MAX_ACTIONS):
@@ -82,11 +84,13 @@ class OhHellEnv(Env):
 
     def __init__(self, config):
         self.name = "ohhell"
-        self.default_game_config = DEFAULT_GAME_CONFIG
-        self.game = Game()
+        max_hand_size = config.get("max_hand_size", DEFAULT_GAME_CONFIG["max_hand_size"])
+        self.default_game_config = DEFAULT_GAME_CONFIG | {"max_hand_size": max_hand_size}
+        self.game = Game(max_hand_size=max_hand_size)
         super().__init__(config)
         self.state_shape = [[111] for _ in range(self.num_players)]
         self.action_shape = [None for _ in range(self.num_players)]
+        self.max_actions = max(MAX_ACTIONS, (self.game.max_hand_size or DEFAULT_MAX_HAND_SIZE) + 2)
 
         with open(
             os.path.join(rlohhell.__path__[0], "games/ohhell/card2index.json"), "r"
@@ -122,7 +126,7 @@ class OhHellEnv(Env):
 
     def _get_legal_actions(self):
         state = self.game.get_state(self.agent_id)
-        mask = mask_from_state(state)
+        mask = mask_from_state(state, self.max_actions)
         legal_ids = OrderedDict()
         for idx, allowed in enumerate(mask):
             if allowed:
@@ -180,11 +184,13 @@ class OhHellEnv2(gym.Env):
         ] = None,
         opponent_pool=None,
         opponent_selector: Optional[Callable[[int, int, object], Dict[int, object]]] = None,
+        max_hand_size: Optional[int] = None,
     ):
         super().__init__()
         self.num_players = num_players
         self.agent_id = agent_id
-        self.game = Game(num_players=num_players)
+        self.max_hand_size = max_hand_size
+        self.game = Game(num_players=num_players, max_hand_size=max_hand_size)
         self.opponent_policy = opponent_policy
         self.opponent_pool = opponent_pool
         self.opponent_selector = opponent_selector
@@ -196,13 +202,15 @@ class OhHellEnv2(gym.Env):
             self.card2index: Dict[str, int] = json.load(file)
 
         self.obs_size = 108 + 2 + (self.num_players * 3) + self.num_players + 1
-        self.action_space = spaces.Discrete(self.MAX_ACTIONS)
+        ceiling = self.game.max_hand_size or DEFAULT_MAX_HAND_SIZE
+        self.max_actions = max(self.MAX_ACTIONS, ceiling + 2)
+        self.action_space = spaces.Discrete(self.max_actions)
         self.observation_space = spaces.Dict(
             {
                 "observation": spaces.Box(
                     low=0.0, high=1.0, shape=(self.obs_size,), dtype=np.float32
                 ),
-                "action_mask": spaces.MultiBinary(self.MAX_ACTIONS),
+                "action_mask": spaces.MultiBinary(self.max_actions),
             }
         )
 
@@ -218,7 +226,7 @@ class OhHellEnv2(gym.Env):
     def reset(self, seed=None, **kwargs):
         if seed is not None:
             self.seed(seed)
-        self.game = Game(num_players=self.num_players)
+        self.game = Game(num_players=self.num_players, max_hand_size=self.max_hand_size)
         self.game.init_game()
         self._final_scores_applied = False
         self._last_score = self._current_score()
@@ -226,7 +234,7 @@ class OhHellEnv2(gym.Env):
         self._advance_to_agent()
         state = self.game.get_state(self.agent_id)
         obs = self._get_obs_dict(state)
-        action_mask = mask_from_state(state, self.MAX_ACTIONS)
+        action_mask = mask_from_state(state, self.max_actions)
         info = {"action_mask": action_mask, "action_masks": action_mask}
         return obs, info
 
@@ -237,7 +245,7 @@ class OhHellEnv2(gym.Env):
             total_reward += self._advance_to_agent()
 
         state = self.game.get_state(self.agent_id)
-        action_mask = mask_from_state(state, self.MAX_ACTIONS)
+        action_mask = mask_from_state(state, self.max_actions)
         if action >= len(action_mask) or not action_mask[action]:
             action = int(np.flatnonzero(action_mask)[0])
 
@@ -252,7 +260,7 @@ class OhHellEnv2(gym.Env):
 
         state = self.game.get_state(self.agent_id)
         obs = self._get_obs_dict(state)
-        next_mask = mask_from_state(state, self.MAX_ACTIONS)
+        next_mask = mask_from_state(state, self.max_actions)
         info = {
             "legal_actions": list(self._get_legal_actions()),
             "action_mask": next_mask,
@@ -355,7 +363,7 @@ class OhHellEnv2(gym.Env):
         return obs
 
     def _get_obs_dict(self, state):
-        action_mask = mask_from_state(state, self.MAX_ACTIONS)
+        action_mask = mask_from_state(state, self.max_actions)
         return {
             "observation": self._extract_state(state),
             "action_mask": action_mask.astype(np.int8),
@@ -365,7 +373,7 @@ class OhHellEnv2(gym.Env):
         """Return the current legal action mask for SB3 MaskablePPO."""
 
         state = self.game.get_state(self.agent_id)
-        return mask_from_state(state, self.MAX_ACTIONS)
+        return mask_from_state(state, self.max_actions)
 
     def _current_score(self) -> int:
         return self.game.players[self.agent_id].tricks_won
@@ -425,7 +433,7 @@ class OhHellEnv2(gym.Env):
 
         if policy is not None:
             state = self.game.get_state(player_id)
-            action_mask = mask_from_state(state)
+            action_mask = mask_from_state(state, self.max_actions)
             obs_dict = self._get_obs_dict(state)
 
             if hasattr(policy, "act"):
