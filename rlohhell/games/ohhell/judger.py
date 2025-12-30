@@ -1,4 +1,5 @@
-from rlohhell.games.ohhell.utils import determine_winner
+from rlohhell.games.ohhell.utils import TRUMP_SUIT, determine_winner
+
 
 class OhHellJudger:
     ''' The Judger class for Oh Hell!

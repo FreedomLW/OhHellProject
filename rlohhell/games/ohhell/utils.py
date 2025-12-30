@@ -3,7 +3,6 @@ import os
 from collections import OrderedDict
 
 import rlohhell
-
 from rlohhell.utils.utils import rank2int, int2rank
 from rlohhell.games.base import Card
 
@@ -92,8 +91,7 @@ def cards2list(cards):
 
 def trumps_in_hand(hand, trump_suit):
     ''' Return an array with the trumps from a given list'''
-    trump_cards = [ card for card in hand if trump_suit == card.suit ]
-    return trump_cards
+    return [card for card in hand if getattr(card, "suit", None) == trump_suit]
 
 
 def get_fixed_trump_card():

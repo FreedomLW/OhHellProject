@@ -2,15 +2,15 @@ from copy import deepcopy, copy
 import numpy as np
 import random
 
-from rlohhell.games.ohhell import Dealer
-from rlohhell.games.ohhell import Player
-from rlohhell.games.ohhell import Judger
-from rlohhell.games.ohhell import Round
+from rlohhell.games.ohhell.dealer import OhHellDealer as Dealer
+from rlohhell.games.ohhell.player import OhHellPlayer as Player
+from rlohhell.games.ohhell.judger import OhHellJudger as Judger
+from rlohhell.games.ohhell.round import OhHellRound as Round
 
 
 class OhHellGame:
 
-    def __init__(self, allow_step_back=False, num_players=4):
+    def __init__(self, allow_step_back=False, num_players=4, player_strategies=None):
         ''' Initialize the class ohhell Game
         '''
         self.allow_step_back = allow_step_back
@@ -18,6 +18,11 @@ class OhHellGame:
         self.num_players = num_players
         self.payoffs = [0 for _ in range(num_players)]
         self.current_player = random.randint(0, self.num_players-1)
+        self.player_strategies = player_strategies or [None for _ in range(num_players)]
+        self.scores = [0 for _ in range(num_players)]
+        self.bids_history = []
+        self.round_sequence = []
+        self.current_round = 0
 
 
     def configure(self, game_config):
@@ -39,23 +44,46 @@ class OhHellGame:
         # Initilize a dealer that can deal cards
         self.dealer = Dealer(self.np_random)
 
-        # Initilize four players to play the game
+        # Initilize players to play the game
         self.players = [Player(i, self.np_random) for i in range(self.num_players)]
 
         # Initialize a judger class which will decide who wins in the end
         self.judger = Judger(self.np_random)
 
-        # Deal cards to each player to prepare for the round
-        cards_per_player = len(self.dealer.deck) // self.num_players
+        max_cards = len(self.dealer.deck) // self.num_players
+        climb = list(range(1, max_cards + 1))
+        plateau = [max_cards for _ in range(self.num_players)]
+        descend = list(range(max_cards - 1, 0, -1))
+        self.round_sequence = climb + plateau + descend
+        self.current_round = 0
+
+        self.history = []
+        self.previously_played_cards = []
+        self.last_winner = 0
+
+        state, player_id = self._start_round(self.round_sequence[self.current_round])
+        return state, player_id
+
+    def _reset_players(self):
+        for player in self.players:
+            player.hand = []
+            player.played_cards = []
+            player.has_proposed = False
+            player.proposed_tricks = 0
+            player.tricks_won = 0
+
+    def _start_round(self, cards_per_player, keep_scores=True):
+        if not keep_scores:
+            self.scores = [0 for _ in range(self.num_players)]
+
+        self.dealer = Dealer(self.np_random)
+        self._reset_players()
+
         for i in range(cards_per_player * self.num_players):
             self.players[i % self.num_players].hand.append(self.dealer.deal_card())
 
-
         self.trump_card = self.dealer.flip_trump_card()
-
-        # Initilize public cards
         self.played_cards = []
-
         self.round = Round(
             np_random=self.np_random,
             dealer=self.dealer,
@@ -64,18 +92,7 @@ class OhHellGame:
             last_winner=self.current_player,
             current_player=self.current_player,
         )
-
-        # Count the round. There are 10 rounds in each game.
         self.round_counter = 0
-        self.max_rounds = cards_per_player
-
-        self.history = []
-
-        self.previously_played_cards = []
-
-
-        # Save history of players that won
-        self.last_winner = 0
 
         player_id = self.round.current_player
         state = self.get_state(player_id)
@@ -126,6 +143,25 @@ class OhHellGame:
             self.round.played_cards = []
             self.round_counter += 1
 
+            if self.round_counter >= self.round.round_number:
+                round_scores = self.judger.judge_game(self.players)
+                self.scores = list(np.array(self.scores) + np.array(round_scores))
+                self.current_round += 1
+
+                if self.current_round < len(self.round_sequence):
+                    next_cards = self.round_sequence[self.current_round]
+                    self.current_player = self.last_winner
+                    state, _ = self._start_round(next_cards, keep_scores=True)
+                else:
+                    state = self.get_state(self.current_player)
+                return state, self.current_player
+
+        if (
+            self.round.players_proposed == self.num_players
+            and len(self.bids_history) == self.current_round
+        ):
+            self.bids_history.append(list(self.round.proposed_tricks))
+
 
 
 
@@ -164,15 +200,6 @@ class OhHellGame:
             return True
         return False
     
-    def get_player_id(self):
-        ''' Return the current player's id
-
-        Returns:
-            (int): current player's id
-        '''
-        return self.current_player
-
-    
     def get_num_players(self):
         ''' Return the number of players in Oh Hell
 
@@ -189,10 +216,7 @@ class OhHellGame:
             (boolean): True if the game is over
         '''
 
-        # If all rounds are finshed
-        if self.round_counter >= self.max_rounds:
-            return True
-        return False
+        return self.current_round >= len(self.round_sequence)
 
     def get_payoffs(self):
         ''' Return the scores of the players
@@ -200,8 +224,42 @@ class OhHellGame:
         Returns:
             (list): The final scores of the players
         '''
-        return self.judger.judge_game(self.players)
-    
+        return tuple(self.scores)
+
+
+
+    def play_automated(self):
+        """Play until a manual slot is reached or the game finishes."""
+
+        if not getattr(self, "players", None):
+            state, player_id = self.init_game()
+        else:
+            player_id = self.current_player
+            state = self.get_state(player_id)
+
+        while not self.is_over():
+            strategy = self.player_strategies[player_id]
+            if strategy is None:
+                return state, player_id
+
+            action = strategy.select_action(self, player_id)
+            state, player_id = self.step(action)
+
+        self.scores = list(self.judger.judge_game(self.players))
+        self.payoffs = tuple(self.scores)
+        return state, player_id
+
+    def play_full_game(self):
+        """Play a complete automated game using configured strategies."""
+
+        self.init_game()
+        self.play_automated()
+        if not self.is_over():
+            raise RuntimeError("Automated play halted before completion")
+
+        self.payoffs = tuple(self.judger.judge_game(self.players))
+        self.scores = list(self.payoffs)
+        return self.payoffs
 
     def get_legal_actions(self):
         ''' Return the legal actions for current player

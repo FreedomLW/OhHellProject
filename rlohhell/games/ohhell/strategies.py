@@ -13,15 +13,20 @@ swapped freely:
     Select a card to play for the current trick.
 
 The :class:`BaseStrategy` class provides the glue logic required by the
-:class:`~rlohhell.games.ohhell.game.OhHellGame` helper methods.  Concrete
+:class:`~rlohhell.games.ohhell.game.OhHellGame` helper methods. Concrete
 strategies only need to focus on the bidding/play heuristics.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import random
 from typing import Iterable, List, Optional
 
+import numpy as np
+
+import rlohhell
 from rlohhell.games.base import Card
 from rlohhell.games.ohhell.utils import TRUMP_SUIT, determine_winner, get_fixed_trump_card
 from rlohhell.utils.utils import rank2int
@@ -78,6 +83,7 @@ class BaseStrategy:
         legal_actions = game.get_legal_actions()
         player = game.players[player_id]
         self._current_player_state = player
+        self._round_state = game.round
 
         if not player.has_proposed:
             bid = self.place_bid(list(player.hand), game.round, legal_actions)
@@ -181,4 +187,94 @@ class HeuristicStrategy(BaseStrategy):
             return min(losing_cards, key=lambda c: _card_strength(c, lead_suit))
 
         return min(legal_cards, key=lambda c: _card_strength(c, lead_suit))
+
+
+class ExplainableMLPStrategy(BaseStrategy):
+    """A tiny, human-auditable MLP for bidding and play selection.
+
+    The model uses one-hot encodings for the player's hand and the global
+    discard history plus a handful of scalar context features (current bid,
+    tricks already won, and remaining tricks in the round). All weights are
+    initialised deterministically to keep the behaviour reproducible and
+    easy to reason about.
+    """
+
+    def __init__(self, hidden_dim: int = 32, seed: int = 13):
+        super().__init__()
+        self.random_state = random.Random(seed)
+        self.rng = np.random.default_rng(seed)
+
+        with open(os.path.join(rlohhell.__path__[0], "games/ohhell/card2index.json"), "r") as fh:
+            self.card2index = json.load(fh)
+
+        # 36 cards per short deck, mirrored for hand + played history, plus
+        # three scalar context features.
+        self.input_dim = 36 * 2 + 3
+        self.hidden_dim = hidden_dim
+
+        scale = 1.0 / np.sqrt(self.input_dim)
+        self.w1 = self.rng.normal(0, scale, size=(self.input_dim, hidden_dim))
+        self.b1 = np.zeros(hidden_dim)
+        self.w2 = self.rng.normal(0, scale, size=(hidden_dim, 64))
+        self.b2 = np.zeros(64)
+
+    def _encode_cards(self, cards: List[Card]):
+        encoded = np.zeros(36, dtype=np.float32)
+        for card in cards:
+            idx = self.card2index.get(card.get_str())
+            if idx is not None:
+                encoded[idx] = 1.0
+        return encoded
+
+    def _forward(self, features: np.ndarray, mask: List[int]):
+        hidden = np.tanh(features @ self.w1 + self.b1)
+        logits = hidden @ self.w2 + self.b2
+        logits = logits[: len(mask)]
+        logits = np.where(mask, logits, -np.inf)
+        return int(np.argmax(logits))
+
+    def _encode_features(self, hand: List[Card], round_state, played: List[Card], player_state):
+        hand_vec = self._encode_cards(hand)
+        played_vec = self._encode_cards(played)
+        context = np.array(
+            [
+                getattr(player_state, "proposed_tricks", 0),
+                getattr(player_state, "tricks_won", 0),
+                getattr(round_state, "round_number", 0),
+            ],
+            dtype=np.float32,
+        )
+        return np.concatenate([hand_vec, played_vec, context])
+
+    def place_bid(self, hand: List[Card], round_state, legal_actions=None):
+        legal = list(legal_actions) if legal_actions is not None else list(range(round_state.round_number + 1))
+        mask = [action in legal for action in range(max(legal) + 1)]
+        player_state = getattr(self, "_current_player_state", None) or type("_P", (), {"proposed_tricks": 0, "tricks_won": 0})()
+        features = self._encode_features(hand, round_state, played=[], player_state=player_state)
+        bid = self._forward(features, mask)
+        if bid not in legal:
+            return min(legal, key=lambda a: abs(a - bid))
+        return bid
+
+    def play_card(self, hand: List[Card], trick_cards: List[Card], legal_actions=None):
+        legal_cards = list(legal_actions) if legal_actions is not None else hand
+        if not legal_cards:
+            return None
+
+        mask = [card in legal_cards for card in hand]
+        player_state = getattr(self, "_current_player_state", None) or type("_P", (), {"proposed_tricks": 0, "tricks_won": 0})()
+        round_state = getattr(self, "_round_state", round_state_placeholder())
+        features = self._encode_features(hand, round_state, played=trick_cards, player_state=player_state)
+        choice_index = self._forward(features, mask)
+        if 0 <= choice_index < len(hand):
+            chosen = hand[choice_index]
+            if chosen in legal_cards:
+                return chosen
+        return legal_cards[0]
+
+
+def round_state_placeholder():
+    placeholder = type("_Round", (), {})()
+    placeholder.round_number = 0
+    return placeholder
 
