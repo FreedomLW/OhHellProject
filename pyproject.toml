@@ -1,0 +1,8 @@
+[project]
+name = "OhHellProject"
+version = "0.1.0"
+dependencies = [
+    "sb3-contrib>=2.7.1",
+    "stable-baselines3>=2.7.1",
+]   # можно оставить пустым, uv add сам добавит
+requires-python = ">=3.11"
