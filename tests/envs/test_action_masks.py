@@ -24,9 +24,10 @@ def test_mask_prevents_illegal_last_bid():
     mask = mask_from_state(state)
 
     assert mask.dtype == np.bool_
-    assert mask.shape == (len(game.players[env.agent_id].hand) + 1,)
+    assert mask.shape == (env.MAX_ACTIONS,)
     assert bool(mask[1]) is False
-    assert mask.sum() == mask.size - 1
+    allowed_bids = np.flatnonzero(mask[: len(game.players[env.agent_id].hand) + 1])
+    assert set(allowed_bids) == {0, 2, 3}
 
 
 def test_mask_enforces_following_suit_and_joker_modes():
@@ -49,7 +50,7 @@ def test_mask_enforces_following_suit_and_joker_modes():
     mask = mask_from_state(state)
 
     assert mask.dtype == np.bool_
-    assert mask.shape == (len(player.hand) + 2,)
+    assert mask.shape == (env.MAX_ACTIONS,)
 
     assert bool(mask[0]) is True  # Follow suit with hearts
     assert bool(mask[2]) is False  # Cannot slough off other suits while holding hearts
