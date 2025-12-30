@@ -1,2 +1,7 @@
 *.pyc
-/runs/*
+__pycache__/
+*.egg-info/
+/runs/
+/tmp/
+files needed to run/
+custom_ppo/
