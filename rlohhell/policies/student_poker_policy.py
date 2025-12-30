@@ -1,7 +1,12 @@
 from typing import Dict, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
+
+from gymnasium import spaces
+from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 
 class StudentPokerPolicy(nn.Module):
@@ -53,14 +58,22 @@ class StudentPokerPolicy(nn.Module):
             state.
         """
 
-        features = self._encode_observation(obs)
-        lstm_input = torch.relu(self.input_projection(features)).unsqueeze(1)
-        lstm_output, next_state = self.lstm(lstm_input, hidden_state)
-        body = lstm_output[:, -1, :]
+        body, next_state = self.encode_body(obs, hidden_state=hidden_state)
 
         logits = self._select_head(body, phase)
         logits = self._apply_mask(logits, action_mask)
         return logits, next_state
+
+    def encode_body(
+        self,
+        obs: Dict[str, Union[torch.Tensor, "numpy.ndarray"]],
+        hidden_state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        features = self._encode_observation(obs)
+        lstm_input = torch.relu(self.input_projection(features)).unsqueeze(1)
+        lstm_output, next_state = self.lstm(lstm_input, hidden_state)
+        body = lstm_output[:, -1, :]
+        return body, next_state
 
     def value(
         self,
@@ -125,3 +138,86 @@ class StudentPokerPolicy(nn.Module):
                 "Action mask must have the same shape as the output logits."
             )
         return logits.masked_fill(~bool_mask, -1e9)
+
+
+def _split_student_observation(flat: torch.Tensor, hand_size: int, trick_size: int) -> Dict[str, torch.Tensor]:
+    hand = flat[..., :hand_size]
+    trick = flat[..., hand_size : hand_size + trick_size]
+    public_state = flat[..., hand_size + trick_size :]
+    return {
+        "hand": hand,
+        "trick": trick,
+        "public_state": public_state,
+    }
+
+
+class StudentPokerExtractor(BaseFeaturesExtractor):
+    """Feature extractor that reuses :class:`StudentPokerPolicy`'s body."""
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        base_model: Optional[StudentPokerPolicy] = None,
+        hand_size: int = 36,
+        trick_size: int = 36,
+        public_state_dim: Optional[int] = None,
+    ) -> None:
+        obs_size = int(np.prod(observation_space["observation"].shape))
+        inferred_public_dim = public_state_dim or max(1, obs_size - hand_size - trick_size)
+        model = base_model or StudentPokerPolicy(
+            public_state_dim=inferred_public_dim,
+            trick_embedding_dim=trick_size,
+            bid_action_size=observation_space["action_mask"].shape[-1],
+            play_action_size=observation_space["action_mask"].shape[-1],
+            hand_size=hand_size,
+        )
+        self.student = model
+        self.hand_size = hand_size
+        self.trick_size = trick_size
+        super().__init__(observation_space, features_dim=model.hidden_size)
+
+    def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:  # type: ignore[override]
+        flat = torch.as_tensor(observations["observation"], dtype=torch.float32)
+        obs_dict = _split_student_observation(flat, self.hand_size, self.trick_size)
+        body, _ = self.student.encode_body(obs_dict)
+        return body
+
+
+class IdentityMlpExtractor(nn.Module):
+    """Bypass extractor that forwards latent features to policy and value heads."""
+
+    def __init__(self, latent_dim: int) -> None:
+        super().__init__()
+        self.latent_dim_pi = latent_dim
+        self.latent_dim_vf = latent_dim
+
+    def forward(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        return features, features
+
+    def forward_actor(self, features: torch.Tensor) -> torch.Tensor:
+        """Match SB3's :class:`MlpExtractor` API for the policy head."""
+
+        return features
+
+    def forward_critic(self, features: torch.Tensor) -> torch.Tensor:
+        """Match SB3's :class:`MlpExtractor` API for the value head."""
+
+        return features
+
+
+class StudentPokerActorCriticPolicy(MaskableActorCriticPolicy):
+    """Maskable PPO policy that swaps in the StudentPoker recurrent backbone."""
+
+    def __init__(self, observation_space: spaces.Dict, action_space: spaces.Discrete, lr_schedule, **kwargs):
+        self._student_extractor: Optional[StudentPokerExtractor] = None
+        super().__init__(
+            observation_space,
+            action_space,
+            lr_schedule,
+            features_extractor_class=StudentPokerExtractor,
+            **kwargs,
+        )
+
+    def _build_mlp_extractor(self) -> None:
+        self.mlp_extractor = IdentityMlpExtractor(self.features_dim)
+
