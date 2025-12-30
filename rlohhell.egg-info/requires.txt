@@ -1,9 +1,0 @@
-numpy>=1.16.3
-termcolor
-
-[torch]
-torch
-GitPython
-gitdb2
-matplotlib
-stable_baselines3
