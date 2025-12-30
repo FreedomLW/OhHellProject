@@ -48,6 +48,8 @@ def mask_from_state(state, max_actions: int = MAX_ACTIONS):
         for bid in legal_actions:
             if 0 <= bid < max_actions:
                 mask[bid] = True
+        if not mask.any():
+            mask[0] = True
         return mask
 
     seven_spades = Card("S", "7")
@@ -73,6 +75,9 @@ def mask_from_state(state, max_actions: int = MAX_ACTIONS):
                 for action in legal_actions
             ):
                 mask[high_idx] = True
+
+    if not mask.any():
+        mask[0] = True
 
     return mask
 

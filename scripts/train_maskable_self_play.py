@@ -13,6 +13,7 @@ import os
 from typing import Callable, Dict, List
 
 import numpy as np
+from sb3_contrib.common.maskable import distributions as mask_distributions
 from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
 from sb3_contrib.ppo_mask import MaskablePPO
 from stable_baselines3 import PPO
@@ -22,7 +23,7 @@ from stable_baselines3.common.utils import get_linear_fn
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from rlohhell.envs.ohhell import OhHellEnv2
-from rlohhell.policies import MaskableLstmPolicy
+from rlohhell.policies import MaskableLstmPolicy, StudentPokerActorCriticPolicy
 from rlohhell.utils.opponents import (
     ModelOpponent,
     OpponentPolicy,
@@ -34,6 +35,23 @@ from rlohhell.utils.opponents import (
 def random_bot(_, action_mask: np.ndarray, __: int, ___=None) -> int:
     legal = np.flatnonzero(action_mask)
     return int(np.random.choice(legal))
+
+
+def _patch_maskable_distribution() -> None:
+    """Clamp MaskableCategorical logits to avoid invalid values during training."""
+
+    original_init = mask_distributions.MaskableCategorical.__init__
+
+    def _safe_init(self, probs=None, logits=None, validate_args=None):  # type: ignore[override]
+        if logits is not None:
+            logits = logits.nan_to_num()
+        return original_init(self, probs=probs, logits=logits, validate_args=validate_args)
+
+    mask_distributions.MaskableCategorical.__init__ = _safe_init
+
+
+# Apply the patch on import so that short training runs and tests remain stable.
+_patch_maskable_distribution()
 
 
 class SharedPolicyOpponent:
@@ -245,11 +263,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Train a maskable LSTM policy instead of the default MLP",
     )
+    parser.add_argument(
+        "--use-student-poker",
+        action="store_true",
+        help="Train the StudentPoker backbone with maskable self-play",
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        default=None,
+        help="Path to a saved checkpoint (.zip) to resume training from",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    _patch_maskable_distribution()
     os.makedirs(args.log_dir, exist_ok=True)
 
     opponent_pool = OpponentPool(default_opponents(), seed=0)
@@ -267,8 +297,17 @@ def main():
     )
 
     ent_schedule = get_linear_fn(args.ent_coef, args.final_ent_coef, 1.0)
+    policy_cls: str | type = "MultiInputPolicy"
+    if args.use_student_poker:
+        policy_cls = StudentPokerActorCriticPolicy
+    elif args.use_lstm_mask:
+        policy_cls = MaskableLstmPolicy
 
-    if args.use_recurrent and not args.use_lstm_mask:
+    if args.resume_from:
+        loader = PPO.load if args.use_recurrent and not args.use_lstm_mask else MaskablePPO.load
+        model = loader(args.resume_from, env=train_env, tensorboard_log=args.log_dir)
+        entropy_scheduler: BaseCallback | None = None
+    elif args.use_recurrent and not args.use_lstm_mask and not args.use_student_poker:
         model = PPO(
             "MlpLstmPolicy",
             train_env,
@@ -276,16 +315,15 @@ def main():
             verbose=1,
             tensorboard_log=args.log_dir,
         )
-        entropy_scheduler: BaseCallback | None = None
+        entropy_scheduler = None
     else:
-        policy = MaskableLstmPolicy if args.use_lstm_mask else "MultiInputPolicy"
         entropy_scheduler = None
         if args.ent_coef != args.final_ent_coef:
             entropy_scheduler = EntropyScheduler(
                 start=args.ent_coef, end=args.final_ent_coef, total_timesteps=args.total_timesteps
             )
         model = MaskablePPO(
-            policy,
+            policy_cls,
             train_env,
             ent_coef=args.ent_coef,
             verbose=1,
@@ -332,7 +370,11 @@ def main():
         callbacks.append(entropy_scheduler)
 
     callback = CallbackList(callbacks)
-    model.learn(total_timesteps=args.total_timesteps, callback=callback)
+    model.learn(
+        total_timesteps=args.total_timesteps,
+        callback=callback,
+        reset_num_timesteps=not bool(args.resume_from),
+    )
     model.save(os.path.join(args.log_dir, "final_model"))
 
 
