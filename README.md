@@ -14,12 +14,17 @@ You can play a quick text-mode match or watch bots battle by using the `ConsoleO
 ```bash
 python - <<'PY'
 from rlohhell.games.ohhell.console import ConsoleOhHellMatch
+from rlohhell.games.ohhell import load_model_strategy
 
 # Example 1: take seat 0 and play against three random bots
 ConsoleOhHellMatch(num_players=4, human_player=0).run()
 
 # Example 2: watch four bots with a fixed seed for reproducible logs
 ConsoleOhHellMatch(num_players=4, human_player=None, seed=123).run()
+
+# Example 3: load a saved MaskablePPO checkpoint and take seat 0 vs the model
+bot = load_model_strategy("runs/some_model/checkpoints/maskable_ppo_100000_steps.zip")
+ConsoleOhHellMatch(num_players=4, human_player=0, strategies={1: bot, 2: bot, 3: bot}).run()
 PY
 ```
 

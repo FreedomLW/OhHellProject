@@ -19,6 +19,10 @@ import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union
 
+from sb3_contrib.ppo_mask import MaskablePPO
+from stable_baselines3 import PPO
+
+from rlohhell.envs.ohhell import OhHellEnv2
 from rlohhell.games.base import Card
 from rlohhell.games.ohhell.game import OhHellGame as Game
 from rlohhell.games.ohhell.strategies import BaseStrategy, RandomStrategy
@@ -55,6 +59,65 @@ def _sort_cards(cards: List[Card]) -> List[Card]:
 def _format_hand(cards: List[Card]) -> str:
     cards = _sort_cards(cards)
     return "  ".join(_card_label(card) for card in cards)
+
+
+class ModelPolicyStrategy(BaseStrategy):
+    """Wrap a saved SB3 policy so it can take turns in console play."""
+
+    def __init__(
+        self,
+        checkpoint_path: str,
+        deterministic: bool = True,
+        use_masks: Optional[bool] = None,
+        device: str = "cpu",
+    ) -> None:
+        super().__init__()
+        self.model = self._load_model(checkpoint_path, device)
+        self.deterministic = deterministic
+        self.use_masks = use_masks if use_masks is not None else isinstance(self.model, MaskablePPO)
+        self._env: Optional[OhHellEnv2] = None
+
+    @staticmethod
+    def _load_model(checkpoint_path: str, device: str):
+        try:
+            return MaskablePPO.load(checkpoint_path, device=device)
+        except (OSError, ValueError):
+            return PPO.load(checkpoint_path, device=device)
+
+    def select_action(self, game: Game, player_id: int) -> Union[int, Card]:
+        if self._env is None or self._env.num_players != game.num_players:
+            self._env = OhHellEnv2(num_players=game.num_players, agent_id=player_id)
+
+        self._env.game = game
+        self._env.agent_id = player_id
+
+        state = game.get_state(player_id)
+        obs = self._env._get_obs_dict(state)
+        action_mask = obs.get("action_mask")
+        kwargs = {"deterministic": self.deterministic}
+        if self.use_masks and action_mask is not None:
+            kwargs["action_masks"] = action_mask
+
+        action, _ = self.model.predict(obs, **kwargs)
+        decoded = self._env._decode_action(int(action), state)
+        legal_actions = game.get_legal_actions()
+        return decoded if decoded in legal_actions else legal_actions[0]
+
+
+def load_model_strategy(
+    checkpoint_path: str,
+    deterministic: bool = True,
+    use_masks: Optional[bool] = None,
+    device: str = "cpu",
+) -> ModelPolicyStrategy:
+    """Convenience helper to create a console-ready strategy from an SB3 zip."""
+
+    return ModelPolicyStrategy(
+        checkpoint_path=checkpoint_path,
+        deterministic=deterministic,
+        use_masks=use_masks,
+        device=device,
+    )
 
 
 @dataclass
