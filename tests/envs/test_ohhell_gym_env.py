@@ -40,3 +40,22 @@ def test_short_training_loop_executes():
     obs, _ = env.reset()
     action, _ = model.predict(obs, deterministic=True)
     assert not np.isnan(action)
+
+
+def test_action_mask_keeps_constant_shape_after_steps():
+    env = OhHellEnv2()
+    obs, info = env.reset()
+
+    mask = info["action_mask"]
+    assert mask.shape == (env.MAX_ACTIONS,)
+    assert env.action_masks().shape == (env.MAX_ACTIONS,)
+
+    for _ in range(5):
+        action = int(np.flatnonzero(mask)[0])
+        obs, _, terminated, _, info = env.step(action)
+        assert obs["action_mask"].shape == (env.MAX_ACTIONS,)
+        assert info["action_mask"].shape == (env.MAX_ACTIONS,)
+        assert env.action_masks().shape == (env.MAX_ACTIONS,)
+        mask = info["action_mask"]
+        if terminated:
+            break
