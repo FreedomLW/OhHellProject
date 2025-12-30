@@ -171,10 +171,10 @@ class StudentPokerExtractor(BaseFeaturesExtractor):
             play_action_size=observation_space["action_mask"].shape[-1],
             hand_size=hand_size,
         )
-        self.student = model
         self.hand_size = hand_size
         self.trick_size = trick_size
         super().__init__(observation_space, features_dim=model.hidden_size)
+        self.student = model
 
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:  # type: ignore[override]
         flat = torch.as_tensor(observations["observation"], dtype=torch.float32)
