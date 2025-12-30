@@ -10,7 +10,13 @@ from rlohhell.games.ohhell.round import OhHellRound as Round
 
 class OhHellGame:
 
-    def __init__(self, allow_step_back=False, num_players=4, player_strategies=None):
+    def __init__(
+        self,
+        allow_step_back=False,
+        num_players=4,
+        player_strategies=None,
+        max_hand_size: int | None = None,
+    ):
         ''' Initialize the class ohhell Game
         '''
         self.allow_step_back = allow_step_back
@@ -23,12 +29,14 @@ class OhHellGame:
         self.bids_history = []
         self.round_sequence = []
         self.current_round = 0
+        self.max_hand_size = max_hand_size
 
 
     def configure(self, game_config):
         ''' Specifiy some game specific parameters, such as number of players
         '''
         self.num_players = game_config['game_num_players']
+        self.max_hand_size = game_config.get("game_max_hand_size", self.max_hand_size)
 
     def init_game(self):
         ''' Initialilze the game of Oh Hell
@@ -50,7 +58,12 @@ class OhHellGame:
         # Initialize a judger class which will decide who wins in the end
         self.judger = Judger(self.np_random)
 
-        max_cards = len(self.dealer.deck) // self.num_players
+        deck_based_max = len(self.dealer.deck) // self.num_players
+        max_cards = deck_based_max
+        if self.max_hand_size is not None:
+            max_cards = min(max_cards, self.max_hand_size)
+        max_cards = max(1, max_cards)
+        self.max_hand_size = max_cards
         climb = list(range(1, max_cards + 1))
         plateau = [max_cards for _ in range(self.num_players)]
         descend = list(range(max_cards - 1, 0, -1))
