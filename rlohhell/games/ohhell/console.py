@@ -240,8 +240,11 @@ class ConsoleOhHellMatch:
 
         while not game.is_over():
             action = self._select_action(game, game.current_player)
-            print(f"  Player {game.current_player} -> {_card_label(action)}")
-            current_trick.append((game.current_player, action))
+            if type(action) == Card:
+                print(f"  Player {game.current_player} -> {_card_label(action)}")
+                current_trick.append((game.current_player, action))
+            else:
+                print(f"Player {game.current_player} bids {action}")
 
             previous_cards = len(game.previously_played_cards)
             game.step(action)
@@ -252,6 +255,7 @@ class ConsoleOhHellMatch:
                 for seat, card in current_trick:
                     print(f"  Player {seat} -> {_card_label(card)}")
                 print(f"Winner: Player {winner}\n")
+                print(f'Current scores {game.get_payoffs()}')
                 print('-'*80)
                 if self.cheat_mode:
                     for seat, player in enumerate(game.players):
