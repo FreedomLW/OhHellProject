@@ -211,6 +211,21 @@ class SnapshotCallback(BaseCallback):
         return True
 
 
+class EntropyScheduler(BaseCallback):
+    """Linearly anneal the entropy coefficient for algorithms that expect floats."""
+
+    def __init__(self, start: float, end: float, total_timesteps: int) -> None:
+        super().__init__(verbose=0)
+        self.start = start
+        self.end = end
+        self.total_timesteps = max(1, total_timesteps)
+
+    def _on_step(self) -> bool:
+        progress = min(1.0, self.num_timesteps / self.total_timesteps)
+        self.model.ent_coef = self.start + progress * (self.end - self.start)
+        return True
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Self-play MaskablePPO training")
     parser.add_argument("--total-timesteps", type=int, default=10_000_000)
@@ -261,12 +276,18 @@ def main():
             verbose=1,
             tensorboard_log=args.log_dir,
         )
+        entropy_scheduler: BaseCallback | None = None
     else:
         policy = MaskableLstmPolicy if args.use_lstm_mask else "MultiInputPolicy"
+        entropy_scheduler = None
+        if args.ent_coef != args.final_ent_coef:
+            entropy_scheduler = EntropyScheduler(
+                start=args.ent_coef, end=args.final_ent_coef, total_timesteps=args.total_timesteps
+            )
         model = MaskablePPO(
             policy,
             train_env,
-            ent_coef=ent_schedule,
+            ent_coef=args.ent_coef,
             verbose=1,
             tensorboard_log=args.log_dir,
         )
@@ -306,9 +327,11 @@ def main():
         deterministic=True,
     )
 
-    callback = CallbackList(
-        [checkpoint_callback, eval_callback, snapshot_callback, tournament_callback]
-    )
+    callbacks = [checkpoint_callback, eval_callback, snapshot_callback, tournament_callback]
+    if entropy_scheduler is not None:
+        callbacks.append(entropy_scheduler)
+
+    callback = CallbackList(callbacks)
     model.learn(total_timesteps=args.total_timesteps, callback=callback)
     model.save(os.path.join(args.log_dir, "final_model"))
 
