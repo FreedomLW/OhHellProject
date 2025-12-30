@@ -311,12 +311,14 @@ class OhHellEnv2(gym.Env):
         return legal_actions[0]
 
     def _get_legal_actions(self):
-        legal_actions = self.game.get_legal_actions()
-        if self.game.round.players_proposed == self.game.num_players:
-            legal_ids = {ACTION_SPACE[action.get_index()]: None for action in legal_actions}
-        else:
-            legal_ids = {ACTION_SPACE[str(action)]: None for action in legal_actions}
-        return OrderedDict(legal_ids)
+        state = self.game.get_state(self.agent_id)
+        mask = mask_from_state(state, self.MAX_ACTIONS)
+        legal_ids = OrderedDict(
+            (idx, None) for idx, allowed in enumerate(mask) if bool(allowed)
+        )
+        if not legal_ids:
+            legal_ids[0] = None
+        return legal_ids
 
     def _extract_state(self, state):
         obs = np.zeros(self.obs_size, dtype=np.float32)

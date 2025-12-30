@@ -361,7 +361,11 @@ def main():
         callbacks.append(entropy_scheduler)
 
     callback = CallbackList(callbacks)
-    model.learn(total_timesteps=args.total_timesteps, callback=callback)
+    model.learn(
+        total_timesteps=args.total_timesteps,
+        callback=callback,
+        reset_num_timesteps=not bool(args.resume_from),
+    )
     model.save(os.path.join(args.log_dir, "final_model"))
 
 
