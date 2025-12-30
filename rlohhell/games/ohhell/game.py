@@ -10,12 +10,19 @@ from rlohhell.games.ohhell.round import OhHellRound as Round
 
 class OhHellGame:
 
-    def __init__(self, allow_step_back=False, num_players=4, player_strategies=None):
+    def __init__(
+        self,
+        allow_step_back=False,
+        num_players=4,
+        player_strategies=None,
+        max_hand_size: int | None = None,
+    ):
         ''' Initialize the class ohhell Game
         '''
         self.allow_step_back = allow_step_back
         self.np_random = np.random.RandomState()
         self.num_players = num_players
+        self.max_hand_size = max_hand_size
         self.payoffs = [0 for _ in range(num_players)]
         self.current_player = random.randint(0, self.num_players-1)
         self.player_strategies = player_strategies or [None for _ in range(num_players)]
@@ -29,6 +36,8 @@ class OhHellGame:
         ''' Specifiy some game specific parameters, such as number of players
         '''
         self.num_players = game_config['game_num_players']
+        if 'max_hand_size' in game_config:
+            self.max_hand_size = game_config['max_hand_size']
 
     def init_game(self):
         ''' Initialilze the game of Oh Hell
@@ -51,9 +60,11 @@ class OhHellGame:
         self.judger = Judger(self.np_random)
 
         max_cards = len(self.dealer.deck) // self.num_players
-        climb = list(range(1, max_cards + 1))
-        plateau = [max_cards for _ in range(self.num_players)]
-        descend = list(range(max_cards - 1, 0, -1))
+        configured_max = self.max_hand_size if self.max_hand_size is not None else max_cards
+        self.max_hand_size = max(1, min(max_cards, configured_max))
+        climb = list(range(1, self.max_hand_size + 1))
+        plateau = [self.max_hand_size for _ in range(self.num_players)]
+        descend = list(range(self.max_hand_size - 1, 0, -1))
         self.round_sequence = climb + plateau + descend
         self.max_rounds = len(self.round_sequence )
         self.current_round = 0

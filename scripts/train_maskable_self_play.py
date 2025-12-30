@@ -6,11 +6,14 @@ Key defaults:
 - 10M timesteps
 - entropy annealing
 - checkpointing and masked evaluation vs fixed bots
+- curriculum on hand sizes (1–4, 1–6, then full cycle) with automatic promotion
+  once the agent clears a target win rate vs baseline bots
 """
 
 import argparse
 import os
-from typing import Callable, Dict, List
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
@@ -52,12 +55,27 @@ class SharedPolicyOpponent:
         return int(action)
 
 
-def build_env(opponent_pool: OpponentPool, seed: int, opponent_selector=None):
+@dataclass
+class TrainingPhase:
+    """Configuration for a curriculum phase."""
+
+    name: str
+    max_hand_size: Optional[int]
+    timesteps: int
+
+
+def build_env(
+    opponent_pool: OpponentPool,
+    seed: int,
+    opponent_selector=None,
+    max_hand_size: Optional[int] = None,
+):
     env = OhHellEnv2(
         num_players=4,
         agent_id=0,
         opponent_pool=opponent_pool,
         opponent_selector=opponent_selector,
+        max_hand_size=max_hand_size,
     )
     env.seed(seed)
     return env
@@ -107,6 +125,61 @@ def evaluate_match(
         per_round_scores.append(payoffs[env.agent_id] / env.game.max_rounds)
 
     return float(np.mean(wins)), float(np.mean(scores)), float(np.mean(per_round_scores))
+
+
+class PhasePromotionCallback(BaseCallback):
+    """Evaluate win-rate against baseline bots and stop the phase early."""
+
+    def __init__(
+        self,
+        env_builder: Callable[..., OhHellEnv2],
+        eval_episodes: int,
+        target_win_rate: float,
+        eval_freq: int,
+        phase_name: str,
+        max_hand_size: Optional[int],
+    ) -> None:
+        super().__init__(verbose=0)
+        self.env_builder = env_builder
+        self.eval_episodes = eval_episodes
+        self.target_win_rate = target_win_rate
+        self.eval_freq = max(1, eval_freq)
+        self.phase_name = phase_name
+        self.max_hand_size = max_hand_size
+        self.passed = False
+        self.baseline_pool = OpponentPool(default_opponents(), seed=42)
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.eval_freq != 0:
+            return True
+
+        agent = ModelOpponent(
+            name="learner_eval",
+            model=self.model,
+            use_masks=isinstance(self.model, MaskablePPO),
+            deterministic=True,
+        )
+
+        win_rates: List[float] = []
+        for idx, opponent in enumerate(self.baseline_pool.policies()):
+            win_rate, _, _ = evaluate_match(
+                agent,
+                opponent,
+                self.env_builder,
+                self.eval_episodes,
+                self.baseline_pool,
+                seed_offset=self.num_timesteps + idx,
+            )
+            win_rates.append(win_rate)
+
+        mean_win_rate = float(np.mean(win_rates)) if win_rates else 0.0
+        self.logger.record(f"phase/{self.phase_name}_win_rate", mean_win_rate)
+
+        if mean_win_rate >= self.target_win_rate:
+            self.passed = True
+            return False
+
+        return True
 
 
 class TournamentLogger(BaseCallback):
@@ -245,6 +318,30 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Train a maskable LSTM policy instead of the default MLP",
     )
+    parser.add_argument(
+        "--target-win-rate",
+        type=float,
+        default=0.6,
+        help="Mean win rate vs default bots required to advance to the next phase",
+    )
+    parser.add_argument(
+        "--phase-eval-episodes",
+        type=int,
+        default=12,
+        help="Number of evaluation episodes per baseline opponent during curriculum checks",
+    )
+    parser.add_argument(
+        "--phase-eval-freq",
+        type=int,
+        default=200_000,
+        help="How often to run curriculum evaluations (in environment steps)",
+    )
+    parser.add_argument(
+        "--phase-steps",
+        type=int,
+        default=None,
+        help="Timesteps to allocate to each curriculum phase; defaults to an even split",
+    )
     return parser.parse_args()
 
 
@@ -254,17 +351,34 @@ def main():
 
     opponent_pool = OpponentPool(default_opponents(), seed=0)
 
-    train_env = make_vec_env(
-        lambda: build_env(opponent_pool=opponent_pool, seed=0),
-        n_envs=args.n_envs,
-        vec_env_cls=DummyVecEnv,
-    )
+    phase_steps = args.phase_steps or max(1, args.total_timesteps // 3)
+    remaining_steps = max(args.total_timesteps - (phase_steps * 2), phase_steps)
+    phases = [
+        TrainingPhase("hand_4", 4, phase_steps),
+        TrainingPhase("hand_6", 6, phase_steps),
+        TrainingPhase("full_cycle", None, remaining_steps),
+    ]
 
-    eval_env = make_vec_env(
-        lambda: build_env(opponent_pool=opponent_pool, seed=123),
-        n_envs=4,
-        vec_env_cls=DummyVecEnv,
-    )
+    def make_train_env(phase: TrainingPhase, seed: int):
+        return make_vec_env(
+            lambda: build_env(
+                opponent_pool=opponent_pool, seed=seed, max_hand_size=phase.max_hand_size
+            ),
+            n_envs=args.n_envs,
+            vec_env_cls=DummyVecEnv,
+        )
+
+    def make_eval_env(phase: TrainingPhase, seed: int):
+        return make_vec_env(
+            lambda: build_env(
+                opponent_pool=opponent_pool, seed=seed, max_hand_size=phase.max_hand_size
+            ),
+            n_envs=4,
+            vec_env_cls=DummyVecEnv,
+        )
+
+    train_env = make_train_env(phases[0], seed=0)
+    eval_env = make_eval_env(phases[0], seed=123)
 
     ent_schedule = get_linear_fn(args.ent_coef, args.final_ent_coef, 1.0)
 
@@ -296,43 +410,76 @@ def main():
         ModelOpponent("current_policy", model, use_masks=isinstance(model, MaskablePPO), deterministic=False)
     )
 
-    checkpoint_callback = CheckpointCallback(
-        save_freq=args.checkpoint_freq // args.n_envs,
-        save_path=os.path.join(args.log_dir, "checkpoints"),
-        name_prefix="maskable_ppo",
-        save_replay_buffer=False,
-        save_vecnormalize=True,
-    )
+    for idx, phase in enumerate(phases):
+        if idx > 0:
+            train_env.close()
+            eval_env.close()
+            train_env = make_train_env(phase, seed=idx)
+            eval_env = make_eval_env(phase, seed=123 + idx)
+            model.set_env(train_env)
 
-    snapshot_callback = SnapshotCallback(
-        pool=opponent_pool,
-        save_dir=os.path.join(args.log_dir, "snapshots"),
-        snapshot_freq=args.eval_freq,
-    )
+        checkpoint_callback = CheckpointCallback(
+            save_freq=max(1, args.checkpoint_freq // args.n_envs),
+            save_path=os.path.join(args.log_dir, "checkpoints"),
+            name_prefix="maskable_ppo",
+            save_replay_buffer=False,
+            save_vecnormalize=True,
+        )
 
-    tournament_callback = TournamentLogger(
-        pool=opponent_pool,
-        env_builder=lambda **kwargs: build_env(**kwargs),
-        eval_episodes=4,
-        log_dir=os.path.join(args.log_dir, "tournament"),
-        eval_freq=args.eval_freq // args.n_envs,
-    )
+        snapshot_callback = SnapshotCallback(
+            pool=opponent_pool,
+            save_dir=os.path.join(args.log_dir, "snapshots"),
+            snapshot_freq=args.eval_freq,
+        )
 
-    eval_callback = MaskableEvalCallback(
-        eval_env,
-        best_model_save_path=os.path.join(args.log_dir, "best_model"),
-        log_path=os.path.join(args.log_dir, "eval_logs"),
-        eval_freq=args.eval_freq // args.n_envs,
-        n_eval_episodes=8,
-        deterministic=True,
-    )
+        tournament_callback = TournamentLogger(
+            pool=opponent_pool,
+            env_builder=lambda **kwargs: build_env(**kwargs, max_hand_size=phase.max_hand_size),
+            eval_episodes=4,
+            log_dir=os.path.join(args.log_dir, "tournament"),
+            eval_freq=max(1, args.eval_freq // args.n_envs),
+        )
 
-    callbacks = [checkpoint_callback, eval_callback, snapshot_callback, tournament_callback]
-    if entropy_scheduler is not None:
-        callbacks.append(entropy_scheduler)
+        eval_callback = MaskableEvalCallback(
+            eval_env,
+            best_model_save_path=os.path.join(args.log_dir, "best_model"),
+            log_path=os.path.join(args.log_dir, "eval_logs"),
+            eval_freq=max(1, args.eval_freq // args.n_envs),
+            n_eval_episodes=8,
+            deterministic=True,
+        )
 
-    callback = CallbackList(callbacks)
-    model.learn(total_timesteps=args.total_timesteps, callback=callback)
+        promotion_callback = PhasePromotionCallback(
+            env_builder=lambda **kwargs: build_env(**kwargs, max_hand_size=phase.max_hand_size),
+            eval_episodes=args.phase_eval_episodes,
+            target_win_rate=args.target_win_rate,
+            eval_freq=max(1, args.phase_eval_freq // args.n_envs),
+            phase_name=phase.name,
+            max_hand_size=phase.max_hand_size,
+        )
+
+        callbacks = [
+            checkpoint_callback,
+            eval_callback,
+            snapshot_callback,
+            tournament_callback,
+            promotion_callback,
+        ]
+        if entropy_scheduler is not None:
+            callbacks.append(entropy_scheduler)
+
+        callback = CallbackList(callbacks)
+        model.learn(total_timesteps=phase.timesteps, callback=callback, reset_num_timesteps=False)
+
+        if promotion_callback.passed:
+            print(
+                f"Advancing from phase {phase.name} after reaching win rate {args.target_win_rate:.0%}"
+            )
+        else:
+            print(f"Completed phase {phase.name} without meeting the target win rate")
+
+    train_env.close()
+    eval_env.close()
     model.save(os.path.join(args.log_dir, "final_model"))
 
 
