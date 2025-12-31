@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import random
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence
 
 import numpy as np
@@ -72,6 +73,20 @@ class ModelOpponent(OpponentPolicy):
         return int(action)
 
 
+class ThetaOpponentWrapper(OpponentPolicy):
+    """Adapter that exposes a :class:`ParamVector` as an opponent policy."""
+
+    def __init__(self, theta: "ParamVector", name: str) -> None:
+        from rlohhell.heuristics.param_bot import ParametricHeuristicOpponent
+
+        self.theta = theta
+        self._opponent = ParametricHeuristicOpponent(theta=theta, name=name)
+        super().__init__(name=name, policy_fn=self._act)
+
+    def _act(self, state, action_mask, obs_dict, game):
+        return self._opponent.act(state, action_mask, obs_dict, game)
+
+
 class OpponentPool:
     """Manage a pool of opponents and sample table compositions."""
 
@@ -121,8 +136,29 @@ class OpponentPool:
         self.add_opponent(opponent)
         return path
 
+    def add_theta_opponent(self, theta: "ParamVector", name: str) -> ThetaOpponentWrapper:
+        opponent = ThetaOpponentWrapper(theta=theta, name=name)
+        self.add_opponent(opponent)
+        return opponent
+
+    def snapshot_theta(self, theta: "ParamVector", step: int, save_dir: str) -> str:
+        os.makedirs(save_dir, exist_ok=True)
+        name = f"theta_{step}"
+        path = os.path.join(save_dir, f"{name}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(asdict(theta), f, indent=2)
+        self.snapshots[name] = path
+        self.add_theta_opponent(theta, name)
+        return path
+
     def policies(self) -> List[OpponentPolicy]:
-        return list(self.opponents)
+        return [
+            opponent
+            for opponent in self.opponents
+            if isinstance(
+                opponent, (ModelOpponent, StrategyOpponent, ThetaOpponentWrapper)
+            )
+        ]
 
 
 def default_opponents() -> List[OpponentPolicy]:
