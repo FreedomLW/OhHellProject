@@ -47,6 +47,31 @@ python scripts/train_maskable_self_play.py --total-timesteps 1_000_000 --num-env
 
 Checkpoints and TensorBoard logs will be written under `runs/` (ignored by git). Saved models can be loaded with `load_model_strategy` for console play or evaluation.
 
+## Эволюционное обучение параметризованного бота
+Запустите эволюционный поиск по весам параметризованного бота:
+
+```bash
+pip install -e .[evo]
+rlohhell-train-evo --algo cem --generations 50 --pop-size 64 --batch-seeds 512 --jobs 8 --log-dir runs/evo
+rlohhell-eval-evo --theta-json runs/evo/best_theta.json --episodes 512 --jobs 8 --log-dir runs/evo_eval
+```
+
+- **CRN-сиды:** и `rlohhell-train-evo`, и `rlohhell-eval-evo` используют фиксированные наборы сидов (`fixed_seeds`) для батчей оценок. Это реализует common random numbers (CRN), чтобы сравнения между поколениями были честными: каждый кандидат играeт на тех же сценариях, а `--seed` сдвигает базовое значение.
+- **Hall-of-Fame:** во время обучения лучшие особи архивируются в `HallOfFame` и могут подмешиваться в турнир следующего поколения через `mix_opponents`, обеспечивая давление на текущую популяцию и следя за регрессией. Архив сохраняется в `runs/evo/hof.json` рядом с `best_theta.json`.
+- **Метрики:** при обучении логируются fitness, `points_per_round`, `win_rate`, а также доля ставок 0 и 1 (см. `metrics.csv` и TensorBoard в `runs/evo`). Команда `rlohhell-eval-evo` дополнительно сохраняет `eval_metrics.csv` с распределением ставок и средними баллами против базовых и Hall-of-Fame оппонентов.
+- **Интеграция θ в RL-самоигру:** полученный `best_theta.json` можно добавить в пул оппонентов перед запуском `scripts/train_maskable_self_play.py`:
+
+  ```python
+  from rlohhell.heuristics.param_bot import ParamVector
+  from rlohhell.utils.opponents import OpponentPool, default_opponents
+
+  theta = ParamVector(**json.load(open("runs/evo/best_theta.json")))
+  opponent_pool = OpponentPool(default_opponents(), seed=0)
+  opponent_pool.add_theta_opponent(theta, name="evo_theta")
+  ```
+
+  После этого пул будет раздавать evo-бота на столы вместе с базовыми стратегиями и снапшотами модели, усиливая разнообразие соперников в процессе RL-самоигры.
+
 ## Running tests
 ```bash
 pytest
