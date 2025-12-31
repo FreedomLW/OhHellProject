@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import random
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 from sb3_contrib.ppo_mask import MaskablePPO
@@ -19,6 +19,9 @@ from rlohhell.games.ohhell.strategies import (
     RandomStrategy,
 )
 
+
+if TYPE_CHECKING:
+    from rlohhell.heuristics.param_bot import ParamVector
 
 PolicyFn = Callable[[Dict, np.ndarray, Dict, object], object]
 
@@ -131,4 +134,12 @@ def default_opponents() -> List[OpponentPolicy]:
         StrategyOpponent("heuristic", HeuristicStrategy()),
         StrategyOpponent("conservative", ConservativeStrategy()),
     ]
+
+
+def make_param_opponent(theta: ParamVector, name: str = "param_bot") -> OpponentPolicy:
+    """Build a parametric heuristic opponent with the provided weights."""
+
+    from rlohhell.heuristics.param_bot import ParametricHeuristicOpponent, ParamVector
+
+    return ParametricHeuristicOpponent(theta=theta, name=name)
 
