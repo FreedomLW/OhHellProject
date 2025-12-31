@@ -10,7 +10,8 @@ Key defaults:
 
 import argparse
 import os
-from typing import Callable, Dict, List
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
@@ -52,12 +53,18 @@ class SharedPolicyOpponent:
         return int(action)
 
 
-def build_env(opponent_pool: OpponentPool, seed: int, opponent_selector=None):
+def build_env(
+    opponent_pool: OpponentPool,
+    seed: int,
+    opponent_selector=None,
+    max_hand_size: Optional[int] = None,
+):
     env = OhHellEnv2(
         num_players=4,
         agent_id=0,
         opponent_pool=opponent_pool,
         opponent_selector=opponent_selector,
+        max_hand_size=max_hand_size,
     )
     env.seed(seed)
     return env
@@ -106,7 +113,101 @@ def evaluate_match(
         scores.append(payoffs[env.agent_id])
         per_round_scores.append(payoffs[env.agent_id] / env.game.max_rounds)
 
-    return float(np.mean(wins)), float(np.mean(scores)), float(np.mean(per_round_scores))
+        return float(np.mean(wins)), float(np.mean(scores)), float(np.mean(per_round_scores))
+
+
+@dataclass
+class CurriculumStage:
+    name: str
+    max_hand_size: Optional[int]
+    target_win_rate: float = 0.6
+
+
+class CurriculumCallback(BaseCallback):
+    """Auto-advance curriculum when the learner clears a win-rate threshold."""
+
+    def __init__(
+        self,
+        stages: List[CurriculumStage],
+        opponent_pool: OpponentPool,
+        env_builder: Callable[[Optional[int]], DummyVecEnv],
+        eval_env_builder: Callable[[Optional[int]], DummyVecEnv],
+        eval_callback: MaskableEvalCallback,
+        tournament_callback: TournamentLogger,
+        eval_frequency: int,
+        eval_episodes: int = 12,
+        baselines: Optional[List[OpponentPolicy]] = None,
+    ) -> None:
+        super().__init__(verbose=1)
+        self.stages = stages
+        self.opponent_pool = opponent_pool
+        self.env_builder = env_builder
+        self.eval_env_builder = eval_env_builder
+        self.eval_callback = eval_callback
+        self.tournament_callback = tournament_callback
+        self.eval_frequency = eval_frequency
+        self.eval_episodes = eval_episodes
+        self.baselines = baselines or default_opponents()
+        self.current_stage = 0
+        self._last_eval = 0
+
+    def _on_training_start(self) -> None:
+        self._apply_stage(self.current_stage)
+
+    def _evaluate_stage(self, stage: CurriculumStage) -> float:
+        learner = ModelOpponent(
+            "learner",
+            model=self.model,
+            use_masks=isinstance(self.model, MaskablePPO),
+            deterministic=False,
+        )
+
+        win_rates: List[float] = []
+        for opponent in self.baselines:
+            win, _, _ = evaluate_match(
+                learner,
+                opponent,
+                env_builder=lambda **kwargs: build_env(
+                    max_hand_size=stage.max_hand_size, **kwargs
+                ),
+                episodes=self.eval_episodes,
+                pool=self.opponent_pool,
+                seed_offset=self.num_timesteps,
+            )
+            win_rates.append(win)
+
+        score = float(np.mean(win_rates)) if win_rates else 0.0
+        self.logger.record("curriculum/win_rate", score)
+        self.logger.record("curriculum/stage", self.current_stage)
+        return score
+
+    def _apply_stage(self, stage_idx: int) -> None:
+        stage = self.stages[stage_idx]
+        old_env = self.model.get_env()
+        new_train_env = self.env_builder(stage.max_hand_size)
+        new_eval_env = self.eval_env_builder(stage.max_hand_size)
+        self.model.set_env(new_train_env)
+        if old_env is not None:
+            old_env.close()
+        self.eval_callback.set_eval_env(new_eval_env)
+        self.tournament_callback.env_builder = (
+            lambda **kwargs: build_env(max_hand_size=stage.max_hand_size, **kwargs)
+        )
+        self.logger.record("curriculum/current_stage", stage_idx)
+        self.logger.record("curriculum/max_hand_size", stage.max_hand_size or 0)
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps - self._last_eval < self.eval_frequency:
+            return True
+
+        stage = self.stages[self.current_stage]
+        win_rate = self._evaluate_stage(stage)
+        self._last_eval = self.num_timesteps
+
+        if win_rate >= stage.target_win_rate and self.current_stage < len(self.stages) - 1:
+            self.current_stage += 1
+            self._apply_stage(self.current_stage)
+        return True
 
 
 class TournamentLogger(BaseCallback):
@@ -245,6 +346,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Train a maskable LSTM policy instead of the default MLP",
     )
+    parser.add_argument(
+        "--curriculum-threshold",
+        type=float,
+        default=0.6,
+        help="Win-rate threshold for advancing curriculum stages",
+    )
     return parser.parse_args()
 
 
@@ -254,17 +361,28 @@ def main():
 
     opponent_pool = OpponentPool(default_opponents(), seed=0)
 
-    train_env = make_vec_env(
-        lambda: build_env(opponent_pool=opponent_pool, seed=0),
-        n_envs=args.n_envs,
-        vec_env_cls=DummyVecEnv,
-    )
+    stages = [
+        CurriculumStage("max_4", max_hand_size=4, target_win_rate=args.curriculum_threshold),
+        CurriculumStage("max_6", max_hand_size=6, target_win_rate=args.curriculum_threshold),
+        CurriculumStage("full_cycle", max_hand_size=None, target_win_rate=args.curriculum_threshold),
+    ]
 
-    eval_env = make_vec_env(
-        lambda: build_env(opponent_pool=opponent_pool, seed=123),
-        n_envs=4,
-        vec_env_cls=DummyVecEnv,
-    )
+    def build_train_env(max_hand_size):
+        return make_vec_env(
+            lambda: build_env(opponent_pool=opponent_pool, seed=0, max_hand_size=max_hand_size),
+            n_envs=args.n_envs,
+            vec_env_cls=DummyVecEnv,
+        )
+
+    def build_eval_env(max_hand_size):
+        return make_vec_env(
+            lambda: build_env(opponent_pool=opponent_pool, seed=123, max_hand_size=max_hand_size),
+            n_envs=4,
+            vec_env_cls=DummyVecEnv,
+        )
+
+    train_env = build_train_env(stages[0].max_hand_size)
+    eval_env = build_eval_env(stages[0].max_hand_size)
 
     ent_schedule = get_linear_fn(args.ent_coef, args.final_ent_coef, 1.0)
 
@@ -312,7 +430,7 @@ def main():
 
     tournament_callback = TournamentLogger(
         pool=opponent_pool,
-        env_builder=lambda **kwargs: build_env(**kwargs),
+        env_builder=lambda **kwargs: build_env(max_hand_size=stages[0].max_hand_size, **kwargs),
         eval_episodes=4,
         log_dir=os.path.join(args.log_dir, "tournament"),
         eval_freq=args.eval_freq // args.n_envs,
@@ -327,7 +445,24 @@ def main():
         deterministic=True,
     )
 
-    callbacks = [checkpoint_callback, eval_callback, snapshot_callback, tournament_callback]
+    curriculum_callback = CurriculumCallback(
+        stages=stages,
+        opponent_pool=opponent_pool,
+        env_builder=build_train_env,
+        eval_env_builder=build_eval_env,
+        eval_callback=eval_callback,
+        tournament_callback=tournament_callback,
+        eval_frequency=args.eval_freq // args.n_envs,
+        eval_episodes=8,
+    )
+
+    callbacks = [
+        checkpoint_callback,
+        eval_callback,
+        snapshot_callback,
+        tournament_callback,
+        curriculum_callback,
+    ]
     if entropy_scheduler is not None:
         callbacks.append(entropy_scheduler)
 
