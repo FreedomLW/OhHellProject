@@ -78,6 +78,8 @@ class OpponentPool:
         self.snapshots: Dict[str, str] = {}
 
     def add_opponent(self, opponent: OpponentPolicy) -> None:
+        if len(self.opponents) > 6:
+            self.opponents = self.opponents[-6:]
         self.opponents.append(opponent)
 
     def sample_table(self, num_players: int, agent_id: int) -> Dict[int, OpponentPolicy]:

@@ -307,7 +307,7 @@ def main():
     snapshot_callback = SnapshotCallback(
         pool=opponent_pool,
         save_dir=os.path.join(args.log_dir, "snapshots"),
-        snapshot_freq=args.eval_freq,
+        snapshot_freq=args.checkpoint_freq,
     )
 
     tournament_callback = TournamentLogger(
