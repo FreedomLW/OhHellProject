@@ -5,6 +5,7 @@ import argparse
 import csv
 import json
 import os
+import statistics
 import random
 import sys
 from dataclasses import asdict
@@ -12,7 +13,7 @@ from typing import List, Sequence
 
 import numpy as np
 
-from rlohhell.evo.eval_core import evaluate_theta, fixed_seeds
+from rlohhell.evo.eval_core import evaluate_population, evaluate_theta, fixed_seeds
 from rlohhell.evo.hof import HallOfFame, mix_opponents
 from rlohhell.evo.optimizers import CEM, _param_bounds, clip_to_bounds, try_cma_es
 from rlohhell.heuristics.param_bot import ParamVector, theta_to_vector, vector_to_theta
@@ -81,6 +82,17 @@ def _prepare_logging(log_dir: str):
     return csv_file, writer, tb_writer
 
 
+def _log_distribution(mean: np.ndarray, std: np.ndarray) -> None:
+    try:
+        from rlohhell.heuristics.param_bot import ParamVector
+
+        names = [f.name for f in ParamVector.__dataclass_fields__.values()]
+        stats = ", ".join(f"{name}: μ={m:.3f} σ={s:.3f}" for name, m, s in zip(names, mean, std))
+    except Exception:  # pragma: no cover - defensive logging only
+        stats = f"mean={mean}, std={std}"
+    print(f"[train_evo] Distribution -> {stats}")
+
+
 def _fitness_from_metrics(metrics: dict) -> float:
     points = float(metrics.get("points_per_round", 0.0))
     win_rate = float(metrics.get("win", 0.0))
@@ -138,13 +150,14 @@ def main(argv: Sequence[str] | None = None) -> None:
 
             opponents = mix_opponents(hof, builtin_opponents, args.k_opponents)
 
+            thetas = [vector_to_theta(vec) for vec in population]
+            metrics_batch = evaluate_population(
+                thetas, opponents=opponents, seeds=seeds, pool=opponent_pool, n_jobs=args.jobs
+            )
+
             scores = []
             gen_best = None
-            for idx, vec in enumerate(population):
-                theta = vector_to_theta(vec)
-                metrics = evaluate_theta(
-                    theta, opponents=opponents, seeds=seeds, pool=opponent_pool, n_jobs=args.jobs
-                )
+            for idx, (theta, metrics) in enumerate(zip(thetas, metrics_batch)):
                 fitness = _fitness_from_metrics(metrics)
                 scores.append(fitness)
 
@@ -168,6 +181,19 @@ def main(argv: Sequence[str] | None = None) -> None:
                 break
 
             opt.tell(np.array(scores, dtype=float))
+
+            avg_score = statistics.mean(scores)
+            best_score_gen = max(scores)
+            print(
+                f"[train_evo] Gen {gen}: best={best_score_gen:.3f}, avg={avg_score:.3f}, "
+                f"hof_size={len(hof.entries)}"
+            )
+
+            if hasattr(opt, "mean") and hasattr(opt, "std"):
+                try:
+                    _log_distribution(np.asarray(opt.mean, dtype=float), np.asarray(opt.std, dtype=float))
+                except Exception:  # pragma: no cover - logging only
+                    pass
 
             if gen_best is not None:
                 gen_score, gen_theta = gen_best

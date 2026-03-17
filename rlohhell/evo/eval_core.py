@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -115,10 +115,6 @@ def _episode_worker(
     return play_episode(agent=agent, opponents=opponent, seed=seed, pool=pool)
 
 
-def _episode_worker_from_args(args):
-    return _episode_worker(*args)
-
-
 def _aggregate_metrics(results: Iterable[Mapping[str, float]]) -> Dict[str, float]:
     totals: Dict[str, List[float]] = {}
     for entry in results:
@@ -126,6 +122,22 @@ def _aggregate_metrics(results: Iterable[Mapping[str, float]]) -> Dict[str, floa
             totals.setdefault(key, []).append(float(value))
 
     return {key: float(np.mean(values)) for key, values in totals.items() if values}
+
+
+def _indexed_episode_worker(args: Tuple[int, ParamVector, OpponentPolicy | Callable, int, OpponentPool]):
+    idx, theta, opponent, seed, pool = args
+    return idx, _episode_worker(theta, opponent, seed, pool)
+
+
+def _aggregate_population(
+    num_candidates: int, results: Iterable[Tuple[int, Mapping[str, float]]]
+) -> List[Dict[str, float]]:
+    buckets: List[List[Mapping[str, float]]] = [[] for _ in range(num_candidates)]
+    for idx, metrics in results:
+        if 0 <= idx < num_candidates:
+            buckets[idx].append(metrics)
+
+    return [_aggregate_metrics(bucket) for bucket in buckets]
 
 
 def evaluate_theta(
@@ -137,11 +149,34 @@ def evaluate_theta(
 ) -> Dict[str, float]:
     """Evaluate ``theta`` against opponents on fixed seeds in parallel."""
 
-    tasks = [(theta, opponent, seed, pool) for seed in seeds for opponent in opponents]
+    metrics = evaluate_population([theta], opponents, seeds, pool, n_jobs=n_jobs)
+    return metrics[0] if metrics else {}
+
+
+def evaluate_population(
+    thetas: Sequence[ParamVector],
+    opponents: List[OpponentPolicy],
+    seeds: List[int],
+    pool: OpponentPool,
+    n_jobs: int = 8,
+) -> List[Dict[str, float]]:
+    """Evaluate multiple thetas in one parallel pool.
+
+    This is more efficient than calling :func:`evaluate_theta` in a loop because
+    it parallelizes over both candidates and episode seeds within a single
+    :class:`~concurrent.futures.ProcessPoolExecutor`.
+    """
+
+    tasks = [
+        (idx, theta, opponent, seed, pool)
+        for idx, theta in enumerate(thetas)
+        for seed in seeds
+        for opponent in opponents
+    ]
     if not tasks:
-        return {}
+        return [{} for _ in thetas]
 
     with ProcessPoolExecutor(max_workers=n_jobs) as executor:
-        results = list(executor.map(_episode_worker_from_args, tasks))
+        results = list(executor.map(_indexed_episode_worker, tasks))
 
-    return _aggregate_metrics(results)
+    return _aggregate_population(len(thetas), results)
