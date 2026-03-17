@@ -1,9 +1,59 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "OhHellProject"
-version = "0.1.0"
-dependencies = [
-    "sb3-contrib>=2.7.1",
-    "stable-baselines3>=2.7.1",
-    "tqdm>=4.67.1",
-]   # можно оставить пустым, uv add сам добавит
+name = "rlohhell"
+dynamic = ["version"]
+description = "Reinforcement-learning and simulation toolkit for the Oh Hell card game"
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "WDS", email = "ppxan4@nottingham.ac.uk" }
+]
+keywords = ["reinforcement learning", "oh hell", "card game", "self-play", "rl"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Operating System :: OS Independent"
+]
+dependencies = [
+  "numpy>=1.23.0,<2.0",
+  "termcolor",
+  "sb3-contrib>=2.7.1",
+  "stable-baselines3>=2.7.1",
+  "tqdm>=4.67.1",
+]
+
+[project.optional-dependencies]
+evo = [
+  "matplotlib",
+  "pandas",
+]
+torch = [
+  "torch",
+  "torchaudio",
+  "torchvision",
+]
+
+[project.scripts]
+rlohhell-train-evo = "rlohhell.evo.train_evo:main"
+rlohhell-eval-evo = "rlohhell.evo.eval_evo:main"
+
+[project.urls]
+Homepage = "https://github.com/LeLingu/OhHellProject"
+Repository = "https://github.com/LeLingu/OhHellProject"
+
+[tool.setuptools.dynamic]
+version = { attr = "rlohhell.__version__" }
+
+[tool.setuptools.packages.find]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+rlohhell = [
+  "games/ohhell/card2index.json",
+  "games/ohhell/jsondata/*"
+]

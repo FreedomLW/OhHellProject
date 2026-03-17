@@ -26,6 +26,7 @@ jobs:
       - name: Verify required harness docs exist
         run: |
           test -s AGENT.md
+          test -s AGENTS.md
           test -s RULES.md
           test -s ARCHITECTURE.md
           test -d docs/planning
@@ -35,8 +36,8 @@ jobs:
 
       - name: Check docs references in governance files
         run: |
-          rg "docs/planning" AGENT.md ARCHITECTURE.md
-          rg "pytest" AGENT.md
+          rg "docs/planning" AGENT.md AGENTS.md ARCHITECTURE.md
+          rg "pytest" AGENT.md AGENTS.md
 
       - name: Run tests
         run: pytest
