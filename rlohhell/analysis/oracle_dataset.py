@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass
 import json
 import random
-from typing import Dict, Iterable, List, Sequence
+from typing import Callable, Dict, Iterable, List, Sequence
 
 import numpy as np
 
@@ -37,11 +37,13 @@ class OracleDatasetGenerator:
         rollouts_per_action: int = 4,
         target_rollout_strategy: BaseStrategy | None = None,
         opponent_profile: str = "random",
+        opponent_factory: Callable[[int], List[BaseStrategy]] | None = None,
     ):
         self.num_players = num_players
         self.rollouts_per_action = rollouts_per_action
         self.target_rollout_strategy = target_rollout_strategy or HeuristicStrategy()
         self.opponent_profile = opponent_profile
+        self.opponent_factory = opponent_factory
 
     def generate(
         self,
@@ -142,6 +144,12 @@ class OracleDatasetGenerator:
         return float(np.mean(scores))
 
     def _build_opponents(self, seed: int) -> List[BaseStrategy]:
+        if self.opponent_factory is not None:
+            strategies = self.opponent_factory(seed)
+            if len(strategies) != self.num_players:
+                raise ValueError("opponent_factory must return one strategy per seat")
+            return strategies
+
         strategies: List[BaseStrategy] = []
         for seat in range(self.num_players):
             if self.opponent_profile == "heuristic":
