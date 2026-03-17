@@ -1,4 +1,4 @@
-"""One-round oracle dataset generation via bounded Monte-Carlo rollouts."""
+"""One-round oracle dataset generation via bounded/explicit search."""
 
 from __future__ import annotations
 
@@ -38,12 +38,16 @@ class OracleDatasetGenerator:
         target_rollout_strategy: BaseStrategy | None = None,
         opponent_profile: str = "random",
         opponent_factory: Callable[[int], List[BaseStrategy]] | None = None,
+        hand_samples_per_seed: int = 1,
+        play_phase_only: bool = True,
     ):
         self.num_players = num_players
         self.rollouts_per_action = rollouts_per_action
         self.target_rollout_strategy = target_rollout_strategy or HeuristicStrategy()
         self.opponent_profile = opponent_profile
         self.opponent_factory = opponent_factory
+        self.hand_samples_per_seed = hand_samples_per_seed
+        self.play_phase_only = play_phase_only
 
     def generate(
         self,
@@ -54,13 +58,15 @@ class OracleDatasetGenerator:
         samples: List[OracleSample] = []
         for seed in seeds:
             for round_size in round_sizes:
-                samples.extend(
-                    self._generate_for_scenario(
-                        seed=seed,
-                        round_size=round_size,
-                        target_seat=target_seat,
+                for sample_idx in range(self.hand_samples_per_seed):
+                    scenario_seed = seed + sample_idx * 100_003
+                    samples.extend(
+                        self._generate_for_scenario(
+                            seed=scenario_seed,
+                            round_size=round_size,
+                            target_seat=target_seat,
+                        )
                     )
-                )
         return samples
 
     def save_jsonl(self, samples: Iterable[OracleSample], path: str) -> None:
@@ -89,26 +95,30 @@ class OracleDatasetGenerator:
             current_player = game.get_player_id()
             if current_player == target_seat:
                 legal_actions = game.get_legal_actions()
-                chosen_action, margin = self._oracle_action(
-                    game=game,
-                    legal_actions=legal_actions,
-                    target_seat=target_seat,
-                    seed=seed,
-                )
-                state = game.get_state(current_player)
-                samples.append(
-                    OracleSample(
-                        observation=self._serialize_state(state),
-                        legal_actions=[self._action_to_str(a) for a in legal_actions],
-                        chosen_action=self._action_to_str(chosen_action),
-                        action_value_margin=float(margin),
-                        round_size=round_size,
-                        phase="bid" if not game.players[current_player].has_proposed else "play",
-                        seat=current_player,
+                in_play_phase = bool(game.players[current_player].has_proposed)
+                if (not self.play_phase_only) or in_play_phase:
+                    chosen_action, margin = self._oracle_action(
+                        game=game,
+                        legal_actions=legal_actions,
+                        target_seat=target_seat,
                         seed=seed,
-                        opponent_profile=self.opponent_profile,
                     )
-                )
+                    state = game.get_state(current_player)
+                    samples.append(
+                        OracleSample(
+                            observation=self._serialize_state(state),
+                            legal_actions=[self._action_to_str(a) for a in legal_actions],
+                            chosen_action=self._action_to_str(chosen_action),
+                            action_value_margin=float(margin),
+                            round_size=round_size,
+                            phase="bid" if not in_play_phase else "play",
+                            seat=current_player,
+                            seed=seed,
+                            opponent_profile=self.opponent_profile,
+                        )
+                    )
+                else:
+                    chosen_action = self.target_rollout_strategy.select_action(game, current_player)
                 game.step(chosen_action)
             else:
                 action = opponent_strategies[current_player].select_action(game, current_player)
@@ -119,7 +129,10 @@ class OracleDatasetGenerator:
     def _oracle_action(self, game: OhHellGame, legal_actions: Sequence[object], target_seat: int, seed: int):
         action_values = []
         for idx, action in enumerate(legal_actions):
-            value = self._estimate_action_value(game, action, target_seat=target_seat, seed=seed + idx * 17)
+            if self.play_phase_only:
+                value = self._estimate_action_value_exhaustive_bins(game, action, target_seat=target_seat)
+            else:
+                value = self._estimate_action_value_rollout(game, action, target_seat=target_seat, seed=seed + idx * 17)
             action_values.append((action, value))
 
         action_values.sort(key=lambda item: item[1], reverse=True)
@@ -127,7 +140,7 @@ class OracleDatasetGenerator:
         second_value = action_values[1][1] if len(action_values) > 1 else best_value
         return best_action, best_value - second_value
 
-    def _estimate_action_value(self, game: OhHellGame, action: object, target_seat: int, seed: int) -> float:
+    def _estimate_action_value_rollout(self, game: OhHellGame, action: object, target_seat: int, seed: int) -> float:
         scores: List[float] = []
         for rollout in range(self.rollouts_per_action):
             sim = deepcopy(game)
@@ -142,6 +155,31 @@ class OracleDatasetGenerator:
                 sim.step(chosen)
             scores.append(float(sim.get_payoffs()[target_seat]))
         return float(np.mean(scores))
+
+    def _estimate_action_value_exhaustive_bins(self, game: OhHellGame, action: object, target_seat: int) -> float:
+        sim = deepcopy(game)
+        sim.step(deepcopy(action))
+        return float(self._max_bins_from_state(sim, target_seat=target_seat))
+
+    def _max_bins_from_state(self, game: OhHellGame, target_seat: int) -> int:
+        if game.is_over():
+            return int(game.players[target_seat].tricks_won)
+
+        player_id = game.get_player_id()
+        if player_id == target_seat:
+            best = -10**9
+            for action in game.get_legal_actions():
+                nxt = deepcopy(game)
+                nxt.step(deepcopy(action))
+                best = max(best, self._max_bins_from_state(nxt, target_seat=target_seat))
+            return best
+
+        # Opponents are resolved with their strategy to keep tree size manageable.
+        strategies = self._build_opponents(0)
+        action = strategies[player_id].select_action(game, player_id)
+        nxt = deepcopy(game)
+        nxt.step(deepcopy(action))
+        return self._max_bins_from_state(nxt, target_seat=target_seat)
 
     def _build_opponents(self, seed: int) -> List[BaseStrategy]:
         if self.opponent_factory is not None:
@@ -189,11 +227,15 @@ def generate_oracle_dataset(
     target_seat: int = 0,
     rollouts_per_action: int = 4,
     opponent_profile: str = "random",
+    hand_samples_per_seed: int = 1,
+    play_phase_only: bool = True,
 ) -> List[OracleSample]:
     """Convenience function for one-shot dataset generation."""
 
     generator = OracleDatasetGenerator(
         rollouts_per_action=rollouts_per_action,
         opponent_profile=opponent_profile,
+        hand_samples_per_seed=hand_samples_per_seed,
+        play_phase_only=play_phase_only,
     )
     return generator.generate(seeds=seeds, round_sizes=round_sizes, target_seat=target_seat)

@@ -5,6 +5,7 @@ from .curriculum_eval import (
     ImitationStrategy,
     IterationResult,
     StageMetrics,
+    find_optimal_oracle_params,
     load_oracle_scenarios,
     run_oracle_bootstrap,
     train_imitation,
@@ -20,6 +21,7 @@ __all__ = [
     "CurriculumReport",
     "ImitationStrategy",
     "train_imitation",
+    "find_optimal_oracle_params",
     "load_oracle_scenarios",
     "run_oracle_bootstrap",
 ]

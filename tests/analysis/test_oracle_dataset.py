@@ -38,3 +38,17 @@ def test_oracle_samples_include_required_metadata_and_legal_label():
         assert sample.seed == 11
         assert sample.opponent_profile == "heuristic"
         assert sample.chosen_action in sample.legal_actions
+
+
+def test_oracle_supports_multiple_hand_samples_and_play_only_mode():
+    generator = OracleDatasetGenerator(
+        rollouts_per_action=1,
+        opponent_profile="heuristic",
+        hand_samples_per_seed=3,
+        play_phase_only=True,
+    )
+
+    samples = generator.generate(seeds=[5], round_sizes=[1], target_seat=0)
+
+    assert len({sample.seed for sample in samples}) == 3
+    assert all(sample.phase == "play" for sample in samples)
