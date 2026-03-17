@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import random
+from types import SimpleNamespace
 from typing import Iterable, List, Optional
 
 import numpy as np
@@ -221,7 +222,14 @@ class ExplainableMLPStrategy(BaseStrategy):
     def _encode_cards(self, cards: List[Card]):
         encoded = np.zeros(36, dtype=np.float32)
         for card in cards:
-            idx = self.card2index.get(card.get_str())
+            if hasattr(card, "get_str"):
+                card_key = card.get_str()
+            elif hasattr(card, "get_index"):
+                card_key = card.get_index()
+            else:
+                card_key = str(card)
+
+            idx = self.card2index.get(card_key)
             if idx is not None:
                 encoded[idx] = 1.0
         return encoded
@@ -246,14 +254,30 @@ class ExplainableMLPStrategy(BaseStrategy):
         )
         return np.concatenate([hand_vec, played_vec, context])
 
+    @staticmethod
+    def _default_player_state():
+        return SimpleNamespace(proposed_tricks=0, tricks_won=0)
+
+    @staticmethod
+    def _default_round_state():
+        return SimpleNamespace(round_number=0)
+
+    @staticmethod
+    def _closest_legal_bid(target_bid: int, legal_bids: List[int]) -> int:
+        return min(legal_bids, key=lambda bid: abs(bid - target_bid))
+
     def place_bid(self, hand: List[Card], round_state, legal_actions=None):
         legal = list(legal_actions) if legal_actions is not None else list(range(round_state.round_number + 1))
-        mask = [action in legal for action in range(max(legal) + 1)]
-        player_state = getattr(self, "_current_player_state", None) or type("_P", (), {"proposed_tricks": 0, "tricks_won": 0})()
+        if not legal:
+            return 0
+
+        max_legal_action = max(action for action in legal if isinstance(action, int))
+        mask = [action in legal for action in range(max_legal_action + 1)]
+        player_state = getattr(self, "_current_player_state", None) or self._default_player_state()
         features = self._encode_features(hand, round_state, played=[], player_state=player_state)
         bid = self._forward(features, mask)
         if bid not in legal:
-            return min(legal, key=lambda a: abs(a - bid))
+            return self._closest_legal_bid(bid, legal)
         return bid
 
     def play_card(self, hand: List[Card], trick_cards: List[Card], legal_actions=None):
@@ -262,8 +286,8 @@ class ExplainableMLPStrategy(BaseStrategy):
             return None
 
         mask = [card in legal_cards for card in hand]
-        player_state = getattr(self, "_current_player_state", None) or type("_P", (), {"proposed_tricks": 0, "tricks_won": 0})()
-        round_state = getattr(self, "_round_state", round_state_placeholder())
+        player_state = getattr(self, "_current_player_state", None) or self._default_player_state()
+        round_state = getattr(self, "_round_state", None) or self._default_round_state()
         features = self._encode_features(hand, round_state, played=trick_cards, player_state=player_state)
         choice_index = self._forward(features, mask)
         if 0 <= choice_index < len(hand):
@@ -271,10 +295,3 @@ class ExplainableMLPStrategy(BaseStrategy):
             if chosen in legal_cards:
                 return chosen
         return legal_cards[0]
-
-
-def round_state_placeholder():
-    placeholder = type("_Round", (), {})()
-    placeholder.round_number = 0
-    return placeholder
-
