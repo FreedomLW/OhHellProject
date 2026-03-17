@@ -45,6 +45,16 @@ python scripts/train_maskable_self_play.py --help  # view options
 python scripts/train_maskable_self_play.py --total-timesteps 1_000_000 --num-envs 8
 ```
 
+Oracle teaching (iterative oracle bootstrap + optional parameter search):
+
+```bash
+python scripts/train_oracle_teacher.py --help
+python scripts/train_oracle_teacher.py --search --seed 0 --num-seeds 1 --hand-samples-per-seed 8 --round-sizes 1,2
+```
+
+
+By default, oracle labeling focuses on **play phase** and uses an exhaustive target-player card search (maximizing tricks/bins won) for each decision. Use `--include-bid-phase` if you also want bidding labels.
+
 Checkpoints and TensorBoard logs will be written under `runs/` (ignored by git). Saved models can be loaded with `load_model_strategy` for console play or evaluation.
 
 ## Эволюционное обучение параметризованного бота

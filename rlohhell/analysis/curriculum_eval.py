@@ -67,6 +67,27 @@ class CurriculumReport:
         return json.dumps(asdict(self), indent=2)
 
 
+@dataclass
+class OracleParamSearchResult:
+    iterations: int
+    rollouts_per_action: int
+    score: float
+    win_rate: float
+    report: CurriculumReport
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "iterations": self.iterations,
+                "rollouts_per_action": self.rollouts_per_action,
+                "score": self.score,
+                "win_rate": self.win_rate,
+                "report": asdict(self.report),
+            },
+            indent=2,
+        )
+
+
 class ImitationStrategy(BaseStrategy):
     """Simple lookup-table student trained from oracle labels."""
 
@@ -116,6 +137,8 @@ def run_oracle_bootstrap(
     iterations: int = 3,
     rollouts_per_action: int = 4,
     target_seat: int = 0,
+    hand_samples_per_seed: int = 1,
+    play_phase_only: bool = True,
 ) -> CurriculumReport:
     teacher_pool = _default_pool()
     student = ImitationStrategy()
@@ -127,6 +150,8 @@ def run_oracle_bootstrap(
             opponent_factory=_factory_for_pool(teacher_pool, target_seat=target_seat),
             target_rollout_strategy=HeuristicStrategy(),
             opponent_profile="curriculum_pool",
+            hand_samples_per_seed=hand_samples_per_seed,
+            play_phase_only=play_phase_only,
         )
         samples = generator.generate(seeds=seeds, round_sizes=round_sizes, target_seat=target_seat)
         student = train_imitation(samples, fallback=student)
@@ -145,6 +170,59 @@ def run_oracle_bootstrap(
         teacher_pool = teacher_pool_with_student
 
     return CurriculumReport(seeds=list(seeds), round_sizes=list(round_sizes), iterations=reports)
+
+
+def find_optimal_oracle_params(
+    seeds: Sequence[int],
+    round_sizes: Sequence[int],
+    iterations_candidates: Sequence[int],
+    rollout_candidates: Sequence[int],
+    target_seat: int = 0,
+    hand_samples_per_seed: int = 1,
+    play_phase_only: bool = True,
+) -> OracleParamSearchResult:
+    if not iterations_candidates:
+        raise ValueError("iterations_candidates must not be empty")
+    if not rollout_candidates:
+        raise ValueError("rollout_candidates must not be empty")
+
+    best: OracleParamSearchResult | None = None
+    for num_iterations in sorted(set(int(v) for v in iterations_candidates)):
+        for rollouts in sorted(set(int(v) for v in rollout_candidates)):
+            report = run_oracle_bootstrap(
+                seeds=seeds,
+                round_sizes=round_sizes,
+                iterations=num_iterations,
+                rollouts_per_action=rollouts,
+                target_seat=target_seat,
+                hand_samples_per_seed=hand_samples_per_seed,
+                play_phase_only=play_phase_only,
+            )
+            final_metrics = report.iterations[-1].against_teacher_pool
+            candidate = OracleParamSearchResult(
+                iterations=num_iterations,
+                rollouts_per_action=rollouts,
+                score=final_metrics.avg_payoff,
+                win_rate=final_metrics.win_rate,
+                report=report,
+            )
+            if best is None:
+                best = candidate
+                continue
+
+            if candidate.score > best.score:
+                best = candidate
+            elif candidate.score == best.score and candidate.win_rate > best.win_rate:
+                best = candidate
+            elif (
+                candidate.score == best.score
+                and candidate.win_rate == best.win_rate
+                and (candidate.iterations, candidate.rollouts_per_action) < (best.iterations, best.rollouts_per_action)
+            ):
+                best = candidate
+
+    assert best is not None
+    return best
 
 
 def load_oracle_scenarios(dataset_jsonl: str) -> tuple[List[int], List[int]]:
