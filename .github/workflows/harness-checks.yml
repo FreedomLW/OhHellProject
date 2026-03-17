@@ -1,0 +1,42 @@
+name: Harness Checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Verify required harness docs exist
+        run: |
+          test -s AGENT.md
+          test -s RULES.md
+          test -s ARCHITECTURE.md
+          test -d docs/planning
+          test -d docs/wip
+          test -d docs/done
+          test -d docs/research
+
+      - name: Check docs references in governance files
+        run: |
+          rg "docs/planning" AGENT.md ARCHITECTURE.md
+          rg "pytest" AGENT.md
+
+      - name: Run tests
+        run: pytest
