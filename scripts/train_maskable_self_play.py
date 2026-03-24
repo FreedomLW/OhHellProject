@@ -245,6 +245,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Train a maskable LSTM policy instead of the default MLP",
     )
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        default=None,
+        help="Path to SB3 checkpoint for warm-start (e.g. BC-pretrained model)",
+    )
+    parser.add_argument(
+        "--use-bruteforce-opponent",
+        action="store_true",
+        help="Add perfect-info bruteforce oracle to the opponent pool",
+    )
     return parser.parse_args()
 
 
@@ -253,6 +264,14 @@ def main():
     os.makedirs(args.log_dir, exist_ok=True)
 
     opponent_pool = OpponentPool(default_opponents(), seed=0)
+
+    if args.use_bruteforce_opponent:
+        from rlohhell.heuristics import BruteforceStrategy
+        from rlohhell.utils.opponents import StrategyOpponent
+
+        opponent_pool.add_opponent(
+            StrategyOpponent("bruteforce", BruteforceStrategy())
+        )
 
     train_env = make_vec_env(
         lambda: build_env(opponent_pool=opponent_pool, seed=0),
@@ -268,7 +287,20 @@ def main():
 
     ent_schedule = get_linear_fn(args.ent_coef, args.final_ent_coef, 1.0)
 
-    if args.use_recurrent and not args.use_lstm_mask:
+    if args.resume_from:
+        model = MaskablePPO.load(
+            args.resume_from,
+            env=train_env,
+            ent_coef=args.ent_coef,
+            verbose=1,
+            tensorboard_log=args.log_dir,
+        )
+        entropy_scheduler: BaseCallback | None = None
+        if args.ent_coef != args.final_ent_coef:
+            entropy_scheduler = EntropyScheduler(
+                start=args.ent_coef, end=args.final_ent_coef, total_timesteps=args.total_timesteps
+            )
+    elif args.use_recurrent and not args.use_lstm_mask:
         model = PPO(
             "MlpLstmPolicy",
             train_env,
@@ -276,7 +308,7 @@ def main():
             verbose=1,
             tensorboard_log=args.log_dir,
         )
-        entropy_scheduler: BaseCallback | None = None
+        entropy_scheduler = None
     else:
         policy = MaskableLstmPolicy if args.use_lstm_mask else "MultiInputPolicy"
         entropy_scheduler = None

@@ -5,3 +5,11 @@ __pycache__/
 /tmp/
 files needed to run/
 custom_ppo/
+/data/
+
+# Experiment outputs (keep configs + tracking files)
+experiments/*/
+
+# Autoresearch loop log (untracked, machine-local)
+results.tsv
+run.log

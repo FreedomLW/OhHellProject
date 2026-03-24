@@ -1,41 +1,49 @@
-# AGENT.md
+# AGENTS.md
 
-## Project overview
-OhHellProject is a reinforcement-learning and simulation codebase for the card game **Oh Hell**.
-It contains:
-- Core game logic (`rlohhell/games/ohhell`)
-- RL/Gym environments (`rlohhell/envs`)
-- Policies and self-play training scripts (`rlohhell/policies`, `scripts/`)
-- Evolutionary training/evaluation pipeline (`rlohhell/evo`)
-- Automated tests (`tests/`)
+## Project goal
 
-## Agent operating contract (OpenAI Harness style)
-When working in this repository, the agent should:
-1. Read project docs first (`README.md`, `ARCHITECTURE.md`, `RULES.md`, `docs/README.md`).
-2. Keep docs and implementation synchronized:
-   - design/plans in `docs/planning/`
-   - active/in-progress notes in `docs/wip/`
-   - completed decisions/tasks in `docs/done/`
-   - ideas and experiments in `docs/research/`
-3. Run verification checks after every meaningful change:
-   - run tests (`pytest`)
-   - ensure required docs exist and are updated
-4. Prefer small, explicit commits with clear scope.
+Train the strongest possible agent for **Oh Hell** ("Студенческий покер") —
+a 4-player 36-card trick-taking game with bidding.
 
-## Definition of done for tasks
-A task is considered done only when all are true:
-- Code and docs match current behavior and architecture.
-- Tests pass locally.
-- Planning entry was moved/recorded as done in `docs/done/`.
-- Any remaining uncertainty is captured in `docs/research/` or a TODO list.
+## Autonomous mode
 
-## Important project commands
-- Install: `uv pip install -r requirements.txt && uv pip install -e .`
-- Run tests: `pytest`
-- Train self-play model: `python scripts/train_maskable_self_play.py --help`
-- Evolutionary training: `rlohhell-train-evo --help`
+For fully autonomous experiment iteration, read and follow `experiments/program.md`.
+That file contains the complete autoresearch loop: setup, config format, experiment loop,
+logging, git workflow, and all known results/findings.
 
-## If something is missing
-If required documentation, rules, or architecture details are missing or ambiguous:
-- note the gap in `docs/research/missing-items.md`
-- add a proposed fix path and owner/action suggestion
+## Key metric
+
+**`avg_per_round_score` vs heuristic** (higher = better). Focus on score, NOT win rate.
+
+## Key commands
+
+| Task | Command |
+|------|---------|
+| Run experiment | `.venv/bin/python scripts/run_experiment.py <config.json>` |
+| Generate BC data | `.venv/bin/python scripts/generate_bc_data.py --help` |
+| Train BC | `.venv/bin/python scripts/train_bc.py --help` |
+| RL self-play | `.venv/bin/python scripts/train_maskable_self_play.py --help` |
+| Evaluate | `.venv/bin/python scripts/evaluate_model.py --model X --episodes 200 --opponents random,greedy,conservative,heuristic` |
+| Tests | `pytest` |
+
+## Baseline models
+
+| Model | Score vs baselines (1000g) | Notes |
+|-------|---------------------------|-------|
+| `models/bc_hybrid_stage3.zip` | 49.5 | BC baseline |
+| `models/rl_finetune_v1.zip` | 53.2 | Single RL fine-tune |
+| `models/rl_chain_v3.zip` | 59.7 | Current best (3x RL chain) |
+
+## Tracking files
+
+| File | Purpose |
+|------|---------|
+| `experiments/program.md` | Full autoresearch agent instructions |
+| `experiments/IDEAS.md` | What to try next |
+| `experiments/RESULTS.md` | All experiment scores |
+| `experiments/THOUGHTS.md` | Observations and analysis |
+| `results.tsv` | Machine-readable experiment log (gitignored) |
+
+## Rules
+
+See `CLAUDE.md` for git rules, read-only boundaries, and style guidelines.

@@ -162,7 +162,8 @@ class ConsoleOhHellMatch:
         if self.record_history:
             self._history.append(entry)
 
-    def _prompt_bid(self, legal_actions: List[int], player_id: int) -> int:
+    def _prompt_bid(self, legal_actions: List[int], player_id: int, hand: List[Card]) -> int:
+        print(f"\nYour hand: {_format_hand(hand)}")
         while True:
             print(f"Player {player_id}, enter your bid {legal_actions}: ", end="")
             raw = input().strip()
@@ -206,7 +207,7 @@ class ConsoleOhHellMatch:
         if player_id == self.human_player:
             if player.has_proposed:
                 return self._prompt_card(legal_actions, player_id, player.hand)
-            return self._prompt_bid(legal_actions, player_id)
+            return self._prompt_bid(legal_actions, player_id, player.hand)
 
         bot = self._bots[player_id]
         return bot.select_action(game, player_id)
@@ -215,30 +216,34 @@ class ConsoleOhHellMatch:
         game = Game(num_players=self.num_players)
         game.init_game()
 
-        print(f"Trump suit: {game.trump_card.get_index()}")
-        for seat, player in enumerate(game.players):
-            if self.cheat_mode:
-                label = _format_hand(player.hand)
-            else: 
-                label = _format_hand(player.hand) if seat == self.human_player else f"{len(player.hand)} cards"
-            print(f"Player {seat} starting hand: {label}")
-
-        # Bidding phase
-        while game.round.players_proposed < game.num_players:
-            player_id = game.current_player
-            action = self._select_action(game, player_id)
-            game.step(action)
-            self._log({"type": "bid", "player": player_id, "bid": action})
-            print(f"Player {player_id} bids {action}")
-
-        print("All bids submitted: " + ", ".join(
-            f"P{idx}={player.proposed_tricks}" for idx, player in enumerate(game.players)
-        ))
-
+        last_round = -1
         current_trick: List[tuple[int, Card]] = []
         previous_cards = 0
 
         while not game.is_over():
+            # Print round banner when a new round starts
+            if game.current_round != last_round:
+                last_round = game.current_round
+                cards_this_round = game.round.round_number
+                print(f"\n{'='*60}")
+                print(f"  Round {game.current_round + 1}/{game.max_rounds}"
+                      f"  |  {cards_this_round} cards  |  Trump: {game.trump_card.get_index()}")
+                print(f"  Scores: {game.get_payoffs()}")
+                print(f"{'='*60}")
+
+                # Bidding phase for this round
+                while game.round.players_proposed < game.num_players:
+                    player_id = game.current_player
+                    action = self._select_action(game, player_id)
+                    game.step(action)
+                    self._log({"type": "bid", "player": player_id, "bid": action})
+                    print(f"Player {player_id} bids {action}")
+
+                print("Bids: " + ", ".join(
+                    f"P{idx}={player.proposed_tricks}" for idx, player in enumerate(game.players)
+                ))
+                print()
+
             action = self._select_action(game, game.current_player)
             if type(action) == Card:
                 print(f"  Player {game.current_player} -> {_card_label(action)}")

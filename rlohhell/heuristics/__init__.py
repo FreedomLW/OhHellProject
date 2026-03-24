@@ -1,3 +1,4 @@
+from .bruteforce_agent import BruteforceStrategy
 from .param_bot import (
     ParamVector,
     ParametricHeuristicOpponent,
@@ -8,6 +9,7 @@ from .param_bot import (
 )
 
 __all__ = [
+    "BruteforceStrategy",
     "ParamVector",
     "ParametricHeuristicOpponent",
     "theta_to_vector",

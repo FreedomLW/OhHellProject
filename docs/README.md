@@ -1,20 +1,21 @@
 # Documentation structure
 
-This folder follows an OpenAI Harness-style documentation lifecycle.
-
 ## Folders
-- `docs/planning/` — planned tasks/specs before implementation.
+
+- `docs/planning/` — planned tasks and specs before implementation.
 - `docs/wip/` — currently active work items.
-- `docs/done/` — completed work logs and applied outcomes.
+- `docs/done/CHANGELOG.md` — single reverse-chronological record of completed work.
 - `docs/research/` — ideas, investigations, and unresolved questions.
 
-## Expected workflow
+## Workflow
+
 1. Create or update a plan in `docs/planning/`.
 2. Move active work notes to `docs/wip/` while implementing.
-3. After completion, store the final record in `docs/done/`.
+3. After completion, add an entry to `docs/done/CHANGELOG.md`.
 4. Keep exploratory material in `docs/research/`.
 
 ## Required root docs
-- `AGENT.md`
+
+- `AGENTS.md`
 - `RULES.md`
 - `ARCHITECTURE.md`

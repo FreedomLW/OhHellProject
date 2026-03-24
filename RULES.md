@@ -1,42 +1,90 @@
 # RULES.md
 
-## Core game constants
-- Deck size is **36 cards**.
-- **Trump suit is always Diamonds**.
-- Number of players is a **pre-selected constant** for the match/configuration.
+## Deck
 
-## Bidding rule
-- Standard “last bidder cannot make the total bids equal to total tricks” rule applies.
-- **Exception:** this rule does **not** apply when the number of cards in the round is less than 4.
+36 cards: ranks **6, 7, 8, 9, 10, J, Q, K, A** in four suits
+(Spades, Hearts, Diamonds, Clubs).
 
-## Round structure
-Each round has two phases:
-1. **Bidding phase** — players announce their trick prediction.
-2. **Play phase** — players play one card each trick.
+**Joker** is represented as 7 of Spades with a mode flag.
+Default mode is **Higher** (highest card in the trick).
 
-## Trick-play rules
-- The leader can play **any** card.
-- Other players should follow the led suit when possible.
-- If a player cannot follow led suit, they should play trump suit if they have it.
-- If neither is available, they may play any card.
+## Trump
+
+Trump suit is always **Diamonds**.
+
+## Players
+
+Number of players is a pre-selected constant for the match (default: 4).
+
+## Round sequence
+
+A full game consists of three phases determined by the number of players
+and deck size. Let `max = 36 / num_players`:
+
+| Phase | Cards per round | Count |
+|-------|-----------------|-------|
+| Climb | 1, 2, …, max−1 | max−1 |
+| Plateau | max (one per player as dealer) | num_players |
+| Descend | max−1, …, 2, 1 | max−1 |
+
+**Total rounds:** `2 × (max − 1) + num_players`
+
+Example (4 players): climb [1..8] + plateau [9,9,9,9] + descend [8..1] = **20 rounds**.
+
+## Bidding
+
+Each round starts with a bidding phase where players announce their trick
+prediction in turn order.
+
+**Last-bidder constraint:** the last player to bid cannot make the total of
+all bids equal to the number of tricks in the round.
+
+**Exception:** this constraint does **not** apply when the round size is less
+than 4 cards.
+
+## Trick play
+
+- The leader may play **any** card.
+- Other players must follow the led suit if possible.
+- If a player cannot follow the led suit, they must play a trump card if
+  they have one.
+- If neither the led suit nor trump is available, they may play any card.
+
+### Trick winner
+
+The highest trump card played wins the trick. If no trump was played,
+the highest card of the led suit wins. Cards of other suits have no
+strength.
 
 ## Joker behavior
-Joker is a special card and is **not treated as Clubs by default**.
-A player may choose Joker mode when playing it:
-- **Higher mode**: Joker is used as the highest card in the requested context.
-- **Simple mode**: Joker is treated as a simple **7 of Clubs**.
 
-If the leader starts with Joker, they may explicitly declare one of:
-- “higher of any suit” (leader names the suit)
-- “simple 7 of clubs”
+The Joker is a special card. A player may choose one of two modes when
+playing it:
 
-For “higher of any suit”:
-- Players who have the declared suit should play a **higher card of that suit**.
-- Players who do not have the declared suit may play any other card.
-- The Joker card always wins that trick.
+- **Higher mode** (default): the Joker acts as the highest card in the
+  requested context and always wins the trick.
+- **Simple mode**: the Joker is treated as a plain 7 of Clubs.
 
-That declaration defines how the opening Joker should be interpreted for that trick.
+When the leader opens with the Joker they declare one of:
 
-## Notes
-- This document reflects required project rules for current PR correction.
-- If code differs from these rules, implementation should be aligned in a follow-up change.
+- **"Higher of [suit]"** — players who hold the declared suit must play a
+  higher card of that suit; others may play any card. The Joker always
+  wins.
+- **"Simple 7 of Clubs"** — the Joker acts as 7♣ and the trick proceeds
+  normally.
+
+## Scoring
+
+At the end of each round every player is scored:
+
+| Condition | Score |
+|-----------|-------|
+| `tricks == bid` (bid > 0) | `10 × bid` |
+| `tricks == bid == 0` | `5` |
+| `tricks > bid` | `tricks` (consolation) |
+| `tricks < bid` | `−10 × bid` (penalty) |
+
+## Win condition
+
+The player with the **highest cumulative score** across all rounds wins the
+game.

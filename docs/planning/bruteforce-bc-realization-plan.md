@@ -1,7 +1,7 @@
 # Planning: realization of one-round oracle + behavior cloning pipeline
 
 Date: 2026-03-17
-Status: Planned
+Status: In progress (WP2 complete — see `docs/done/CHANGELOG.md`)
 Owner suggestion: RL/Simulation contributor
 
 ## Goal
